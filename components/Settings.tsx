@@ -1,25 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, Plus, X, DollarSign, Save, Network, Database } from 'lucide-react';
+import { Tags, Plus, X, DollarSign, Save, Network, Database, Target, AlertCircle } from 'lucide-react';
+import { Budget } from '../types';
 
 interface Props {
   categories: string[];
   setCategories: (cats: string[]) => void;
+  budgets: Budget[];
+  setBudgets: (budgets: Budget[]) => void;
   usdRates: { blue: number; official: number };
   onUpdateRates: (rates: { blue: number; official: number }) => void;
   n8nWebhookUrl: string;
   onUpdateWebhookUrl: (url: string) => void;
 }
 
-const Settings: React.FC<Props> = ({ categories, setCategories, usdRates, onUpdateRates, n8nWebhookUrl, onUpdateWebhookUrl }) => {
+const Settings: React.FC<Props> = ({ 
+  categories, setCategories, 
+  budgets, setBudgets,
+  usdRates, onUpdateRates, 
+  n8nWebhookUrl, onUpdateWebhookUrl 
+}) => {
   const [newCat, setNewCat] = useState('');
   const [localRates, setLocalRates] = useState(usdRates);
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
   const [googleWebAppUrl, setGoogleWebAppUrl] = useState('');
+  const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem('finance_arch_google_webapp_url');
     if (saved) setGoogleWebAppUrl(saved);
-  }, []);
+    setLocalBudgets(budgets);
+  }, [budgets]);
 
   const addCategory = () => {
     if (newCat && !categories.includes(newCat)) {
@@ -30,170 +40,158 @@ const Settings: React.FC<Props> = ({ categories, setCategories, usdRates, onUpda
 
   const removeCategory = (cat: string) => {
     setCategories(categories.filter(c => c !== cat));
+    setLocalBudgets(localBudgets.filter(b => b.category !== cat));
   };
 
-  const handleSaveRates = () => {
+  const updateBudget = (category: string, limit: number) => {
+    const exists = localBudgets.find(b => b.category === category);
+    let newBudgets;
+    if (exists) {
+      newBudgets = localBudgets.map(b => b.category === category ? { ...b, limit } : b);
+    } else {
+      newBudgets = [...localBudgets, { category, limit }];
+    }
+    setLocalBudgets(newBudgets);
+  };
+
+  const handleSaveAll = () => {
     onUpdateRates(localRates);
-  };
-
-  const handleSaveAI = () => {
     onUpdateWebhookUrl(localWebhook);
-    alert("Configuración de IA actualizada.");
-  };
-
-  const handleSaveGoogleSheets = () => {
-    localStorage.setItem('finance_arch_google_webapp_url', googleWebAppUrl);
-    alert("URL de Google Sheets guardada.");
+    setBudgets(localBudgets);
+    localStorage.setItem('finance_arch_google_webapp_url', googleWebAppUrl.trim());
+    alert("Configuración guardada correctamente.");
   };
 
   return (
-    <div className="space-y-12 animate-in fade-in duration-500 pb-12">
-      <header>
-        <h2 className="text-3xl font-bold text-slate-800">Ajustes</h2>
-        <p className="text-slate-500">Configuración global del sistema</p>
+    <div className="space-y-12 animate-in fade-in duration-500 pb-20">
+      <header className="flex justify-between items-end">
+        <div>
+          <h2 className="text-3xl font-bold text-slate-800">Ajustes</h2>
+          <p className="text-slate-500 text-sm">Personalización y conectividad del sistema</p>
+        </div>
+        <button 
+          onClick={handleSaveAll}
+          className="bg-slate-900 text-white font-bold py-3 px-8 rounded-2xl hover:bg-black transition-all shadow-xl flex items-center gap-2"
+        >
+          <Save size={20} />
+          Guardar Todo
+        </button>
       </header>
 
-      <section className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
-            <Database size={24} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+        <section className="space-y-6">
+          <SectionHeader icon={Database} title="Google Sheets" color="emerald" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Web App URL</label>
+              <input 
+                type="text"
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs"
+                value={googleWebAppUrl}
+                onChange={e => setGoogleWebAppUrl(e.target.value)}
+              />
+              <p className="mt-2 text-[10px] text-slate-400 italic flex items-center gap-1">
+                <AlertCircle size={10} /> Pegar la URL de implementación de Apps Script.
+              </p>
+            </div>
           </div>
-          <h3 className="text-xl font-bold text-slate-800">Conexión con Google Sheets</h3>
-        </div>
-        
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm max-w-2xl space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Google Web App URL</label>
-            <input 
-              type="text"
-              placeholder="https://script.google.com/macros/s/.../exec"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-              value={googleWebAppUrl}
-              onChange={e => setGoogleWebAppUrl(e.target.value)}
-            />
-            <p className="mt-2 text-xs text-slate-400 italic">
-              Pega aquí la URL que obtienes al {"Implementar > Nueva implementación"} en Apps Script.
-            </p>
-          </div>
-          <button 
-            onClick={handleSaveGoogleSheets}
-            className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
-          >
-            <Save size={20} />
-            Sincronizar Google Sheets
-          </button>
-        </div>
-      </section>
+        </section>
 
-      <section className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-            <Network size={24} />
+        <section className="space-y-6">
+          <SectionHeader icon={Network} title="Kora AI (n8n)" color="indigo" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">n8n Webhook URL</label>
+              <input 
+                type="text"
+                placeholder="https://primary-production.n8n.cloud/webhook/..."
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xs"
+                value={localWebhook}
+                onChange={e => setLocalWebhook(e.target.value)}
+              />
+            </div>
           </div>
-          <h3 className="text-xl font-bold text-slate-800">Configuración de IA (n8n)</h3>
-        </div>
-        
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm max-w-2xl space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">n8n Webhook URL</label>
-            <input 
-              type="text"
-              placeholder="https://primary-production.n8n.cloud/webhook/..."
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={localWebhook}
-              onChange={e => setLocalWebhook(e.target.value)}
-            />
-          </div>
-          <button 
-            onClick={handleSaveAI}
-            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-100"
-          >
-            <Save size={20} />
-            Guardar Configuración IA
-          </button>
-        </div>
-      </section>
+        </section>
 
-      <section className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-            <DollarSign size={24} />
+        <section className="space-y-6">
+          <SectionHeader icon={DollarSign} title="Tipos de Cambio" color="cyan" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm grid grid-cols-2 gap-4">
+            <RateField label="Oficial" value={localRates.official} onChange={v => setLocalRates({...localRates, official: v})} />
+            <RateField label="Blue" value={localRates.blue} onChange={v => setLocalRates({...localRates, blue: v})} />
           </div>
-          <h3 className="text-xl font-bold text-slate-800">Tipos de Cambio (ARS/USD)</h3>
-        </div>
-        
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm max-w-2xl grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Dólar Oficial</label>
-            <input 
-              type="number"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={localRates.official}
-              onChange={e => setLocalRates({...localRates, official: parseFloat(e.target.value)})}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Dólar Blue</label>
-            <input 
-              type="number"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={localRates.blue}
-              onChange={e => setLocalRates({...localRates, blue: parseFloat(e.target.value)})}
-            />
-          </div>
-          <button 
-            onClick={handleSaveRates}
-            className="sm:col-span-2 w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition-all flex items-center justify-center gap-2"
-          >
-            <Save size={20} />
-            Actualizar Monedas
-          </button>
-        </div>
-      </section>
+        </section>
 
-      <section className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-            <Tags size={24} />
-          </div>
-          <h3 className="text-xl font-bold text-slate-800">Categorías</h3>
-        </div>
-
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm max-w-2xl">
-          <div className="flex gap-4 mb-8">
-            <input 
-              type="text" 
-              placeholder="Nueva categoría..." 
-              className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={newCat}
-              onChange={e => setNewCat(e.target.value)}
-            />
-            <button 
-              onClick={addCategory}
-              className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2"
-            >
-              <Plus size={20} />
-              Añadir
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <section className="space-y-6">
+          <SectionHeader icon={Target} title="Presupuestos por Categoría" color="rose" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4 max-h-[400px] overflow-y-auto no-scrollbar">
             {categories.map(cat => (
-              <div key={cat} className="group flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 hover:bg-white transition-all">
-                <span className="font-semibold text-slate-700">{cat}</span>
-                <button 
-                  onClick={() => removeCategory(cat)}
-                  className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                >
-                  <X size={16} />
-                </button>
+              <div key={cat} className="flex items-center justify-between gap-4 p-3 bg-slate-50 rounded-2xl">
+                <span className="text-xs font-bold text-slate-700">{cat}</span>
+                <div className="relative w-32">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">$</span>
+                  <input 
+                    type="number"
+                    className="w-full pl-6 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-rose-500"
+                    value={localBudgets.find(b => b.category === cat)?.limit || 0}
+                    onChange={e => updateBudget(cat, parseFloat(e.target.value))}
+                  />
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
+
+        <section className="space-y-6 lg:col-span-2">
+          <SectionHeader icon={Tags} title="Gestión de Categorías" color="slate" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+            <div className="flex gap-4 mb-8">
+              <input 
+                type="text" 
+                placeholder="Nueva categoría..." 
+                className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-slate-400"
+                value={newCat}
+                onChange={e => setNewCat(e.target.value)}
+              />
+              <button onClick={addCategory} className="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-black">Añadir</button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {categories.map(cat => (
+                <div key={cat} className="group flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100 hover:bg-white transition-all">
+                  <span className="text-xs font-bold text-slate-600">{cat}</span>
+                  <button onClick={() => removeCategory(cat)} className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100"><X size={14}/></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 };
+
+const SectionHeader = ({ icon: Icon, title, color }: any) => (
+  <div className="flex items-center gap-3">
+    <div className={`p-2 bg-${color}-50 text-${color}-600 rounded-xl`}>
+      <Icon size={20} />
+    </div>
+    <h3 className="text-lg font-bold text-slate-800">{title}</h3>
+  </div>
+);
+
+const RateField = ({ label, value, onChange }: any) => (
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</label>
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+      <input 
+        type="number"
+        className="w-full pl-6 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm"
+        value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+      />
+    </div>
+  </div>
+);
 
 export default Settings;

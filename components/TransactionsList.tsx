@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, TransactionType, formatCurrency, Currency } from '../types';
-import { Search, Filter, Edit3, X } from 'lucide-react';
+import { Search, Filter, Edit3, X, Download, FileSpreadsheet } from 'lucide-react';
 
 interface Props {
   transactions: Transaction[];
@@ -24,6 +24,30 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories })
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [transactions, searchTerm, filterCategory, filterType]);
+
+  const exportToCSV = () => {
+    const headers = ['Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoría', 'Cuenta', 'Tipo'];
+    const rows = filteredTransactions.map(t => [
+      t.date,
+      `"${t.concept}"`,
+      t.amount,
+      t.currency,
+      `"${t.category}"`,
+      `"${t.sourceAccount}"`,
+      t.type
+    ]);
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `kora_movimientos_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -50,21 +74,30 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories })
             )}
           </div>
           
+          <button 
+            onClick={exportToCSV}
+            className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 font-bold text-xs"
+            title="Exportar a CSV"
+          >
+            <FileSpreadsheet size={18} />
+            <span className="hidden sm:inline">Exportar</span>
+          </button>
+
           <select 
-            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none"
+            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm cursor-pointer"
             value={filterCategory}
             onChange={e => setFilterCategory(e.target.value)}
           >
-            <option value="all">Categorías</option>
+            <option value="all">Todas las Categorías</option>
             {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
           <select 
-            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none"
+            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm cursor-pointer"
             value={filterType}
             onChange={e => setFilterType(e.target.value)}
           >
-            <option value="all">Tipos</option>
+            <option value="all">Todos los Tipos</option>
             {Object.values(TransactionType).map(v => <option key={v} value={v}>{v}</option>)}
           </select>
         </div>
@@ -97,7 +130,10 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories })
                     <td className="px-6 py-5">
                       <div className="flex flex-col">
                         <span className="font-semibold text-slate-700">{t.concept}</span>
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">{t.sourceAccount}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">{t.sourceAccount}</span>
+                          {!t.synced && <span className="text-[8px] bg-amber-50 text-amber-500 px-1 rounded">Pendiente Sync</span>}
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-5">
@@ -113,7 +149,7 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories })
                     </td>
                     <td className="px-6 py-5 text-right">
                       {!t.isSettled && (
-                        <button onClick={() => onEdit(t)} className="p-2 text-slate-300 hover:text-indigo-600">
+                        <button onClick={() => onEdit(t)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors">
                           <Edit3 size={16} />
                         </button>
                       )}

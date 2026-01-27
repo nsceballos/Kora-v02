@@ -1,4 +1,4 @@
-import { Transaction, Account } from '../types';
+import { Transaction, Account, AppData, Budget } from '../types';
 
 declare const google: any;
 
@@ -13,9 +13,16 @@ const isGasEnv = () => {
 };
 
 /**
- * Ejecuta una acción en el backend con lógica de reintento y validación.
+ * Cola de sincronización para soporte offline-first
  */
-async function runAction(action: string, data?: any, retries = 2): Promise<any> {
+const getQueue = (): any[] => JSON.parse(localStorage.getItem('kora_sync_queue') || '[]');
+const addToQueue = (action: string, data: any) => {
+  const queue = getQueue();
+  queue.push({ action, data, timestamp: Date.now() });
+  localStorage.setItem('kora_sync_queue', JSON.stringify(queue));
+};
+
+async function runAction(action: string, data?: any, retries = 3): Promise<any> {
   if (isGasEnv()) {
     return new Promise((resolve, reject) => {
       google.script.run
@@ -25,92 +32,97 @@ async function runAction(action: string, data?: any, retries = 2): Promise<any> 
   } 
   
   const url = getWebAppUrl();
-  if (!url || !url.startsWith('http')) return null;
+  if (!url || !url.startsWith('http')) {
+    if (action !== 'getAppData') addToQueue(action, data);
+    return null;
+  }
 
   for (let i = 0; i <= retries; i++) {
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain' }, // GAS requiere text/plain para evitar preflight excesivo
+        redirect: 'follow', // Crítico: GAS usa redireccionamientos 302
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, data })
       });
 
       if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       
-      const result = await response.json();
-      return result;
+      const text = await response.text();
+      try {
+        const result = JSON.parse(text);
+        if (result.error) throw new Error(result.error);
+        return result;
+      } catch (e) {
+        console.warn('Respuesta no es JSON:', text);
+        return { success: true, raw: text };
+      }
     } catch (e) {
       console.warn(`Intento ${i + 1} fallido para ${action}:`, e);
-      if (i === retries) return null;
-      await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Exponential backoff simple
+      if (i === retries) {
+        if (action !== 'getAppData') addToQueue(action, data);
+        return null;
+      }
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i))); // Exponential backoff
     }
   }
   return null;
 }
 
 export const sheetService = {
-  async getAppData(): Promise<{ transactions: Transaction[], accounts: Account[], categories: string[] }> {
-    const fallback = { transactions: [], accounts: [], categories: [] };
+  async getAppData(): Promise<AppData> {
+    const fallback: AppData = { transactions: [], accounts: [], categories: [], budgets: [] };
     
     try {
       const result = await runAction('getAppData');
       if (result && typeof result === 'object') {
-        return {
+        const data = {
           transactions: Array.isArray(result.transactions) ? result.transactions : [],
           accounts: Array.isArray(result.accounts) ? result.accounts : [],
-          categories: Array.isArray(result.categories) ? result.categories : []
+          categories: Array.isArray(result.categories) ? result.categories : [],
+          budgets: Array.isArray(result.budgets) ? result.budgets : []
         };
+        localStorage.setItem('finance_arch_data', JSON.stringify(data));
+        return data;
       }
     } catch (e) {
       console.error("Error cargando de la nube:", e);
     }
 
     const stored = localStorage.getItem('finance_arch_data');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        return {
-          transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-          accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
-          categories: Array.isArray(parsed.categories) ? parsed.categories : []
-        };
-      } catch (e) {
-        console.error("Error parseando local storage:", e);
-      }
-    }
+    return stored ? JSON.parse(stored) : fallback;
+  },
+
+  async flushQueue() {
+    const queue = getQueue();
+    if (queue.length === 0) return;
     
-    return fallback;
+    console.log(`Sincronizando ${queue.length} acciones pendientes...`);
+    const remaining = [];
+    for (const item of queue) {
+      const success = await runAction(item.action, item.data, 1);
+      if (!success) remaining.push(item);
+    }
+    localStorage.setItem('kora_sync_queue', JSON.stringify(remaining));
   },
 
   async saveTransaction(t: Transaction): Promise<boolean> {
     const res = await runAction('saveTransaction', t);
-    const current = await this.getAppData();
-    
-    const idx = current.transactions.findIndex(item => item.id === t.id);
-    if (idx !== -1) current.transactions[idx] = t;
-    else current.transactions.push(t);
-    
-    localStorage.setItem('finance_arch_data', JSON.stringify(current));
     return !!res;
   },
 
   async saveAccount(acc: Account): Promise<boolean> {
     const res = await runAction('saveAccount', acc);
-    const current = await this.getAppData();
-    
-    const idx = current.accounts.findIndex(a => a.id === acc.id);
-    if (idx !== -1) current.accounts[idx] = acc;
-    else current.accounts.push(acc);
-    
-    localStorage.setItem('finance_arch_data', JSON.stringify(current));
     return !!res;
   },
 
   async saveCategories(categories: string[]): Promise<boolean> {
     const res = await runAction('saveCategories', categories);
-    const current = await this.getAppData();
-    current.categories = categories;
-    localStorage.setItem('finance_arch_data', JSON.stringify(current));
+    return !!res;
+  },
+
+  async saveBudgets(budgets: Budget[]): Promise<boolean> {
+    const res = await runAction('saveBudgets', budgets);
     return !!res;
   }
 };

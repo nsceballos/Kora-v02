@@ -6,10 +6,17 @@ const SS = SpreadsheetApp.getActiveSpreadsheet();
 const SHEETS = {
   TRANSACTIONS: 'Transacciones',
   ACCOUNTS: 'Cuentas',
-  CATEGORIES: 'Categorias'
+  CATEGORIES: 'Categorias',
+  BUDGETS: 'Presupuestos'
 };
 
-function doGet() {
+function doGet(e) {
+  // Soporte para JSONP si fuera necesario, aunque fetch standard es preferible
+  if (e.parameter.callback) {
+    const res = getAppData();
+    return ContentService.createTextOutput(e.parameter.callback + '(' + JSON.stringify(res) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
   return HtmlService.createHtmlOutput('Kora API Active').setTitle('Kora Backend');
 }
 
@@ -18,12 +25,10 @@ function doPost(e) {
   try {
     request = JSON.parse(e.postData.contents);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ error: "Invalid JSON" }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return createJsonResponse({ error: "Invalid JSON" });
   }
 
-  const action = request.action;
-  const data = request.data;
+  const { action, data } = request;
   let result = { success: false };
 
   try {
@@ -32,15 +37,18 @@ function doPost(e) {
       case 'saveTransaction': result = saveTransaction(data); break;
       case 'saveAccount': result = saveAccount(data); break;
       case 'saveCategories': result = saveCategories(data); break;
-      default: result = { error: "Action not recognized" };
+      case 'saveBudgets': result = saveBudgets(data); break;
+      default: result = { error: "Action '" + action + "' not recognized" };
     }
   } catch (err) {
     result = { error: err.message };
   }
 
-  // GAS no soporta headers CORS personalizados en ContentService fácilmente,
-  // pero devolver un TextOutput con el JSON es la forma estándar de evitar bloqueos.
-  return ContentService.createTextOutput(JSON.stringify(result))
+  return createJsonResponse(result);
+}
+
+function createJsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -58,6 +66,11 @@ function setupDatabase() {
   if (aSheet.getLastRow() === 0) {
     aSheet.appendRow(['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
   }
+  
+  const bSheet = SS.getSheetByName(SHEETS.BUDGETS);
+  if (bSheet.getLastRow() === 0) {
+    bSheet.appendRow(['Categoria', 'Limite']);
+  }
 }
 
 function getAppData() {
@@ -65,7 +78,8 @@ function getAppData() {
   return {
     transactions: getSheetData(SHEETS.TRANSACTIONS),
     accounts: getSheetData(SHEETS.ACCOUNTS),
-    categories: getSheetData(SHEETS.CATEGORIES).map(r => r.nombre || r.Nombre)
+    categories: getSheetData(SHEETS.CATEGORIES).map(r => r.nombre || r.Nombre),
+    budgets: getSheetData(SHEETS.BUDGETS)
   };
 }
 
@@ -75,7 +89,6 @@ function saveTransaction(t) {
   const data = sheet.getDataRange().getValues();
   let rowIdx = -1;
   
-  // Buscar si ya existe para actualizarlo
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === t.id) { rowIdx = i + 1; break; }
   }
@@ -86,11 +99,8 @@ function saveTransaction(t) {
     t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo', t.isSettled ? 'SI' : 'NO'
   ];
 
-  if (rowIdx !== -1) {
-    sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
-  } else {
-    sheet.appendRow(vals);
-  }
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  else sheet.appendRow(vals);
   return { success: true };
 }
 
@@ -113,7 +123,16 @@ function saveCategories(categories) {
   const sheet = SS.getSheetByName(SHEETS.CATEGORIES);
   sheet.clear();
   sheet.appendRow(['Nombre']);
-  categories.forEach(c => c && sheet.appendRow([c]));
+  categories.filter(c => c).forEach(c => sheet.appendRow([c]));
+  return { success: true };
+}
+
+function saveBudgets(budgets) {
+  setupDatabase();
+  const sheet = SS.getSheetByName(SHEETS.BUDGETS);
+  sheet.clear();
+  sheet.appendRow(['Categoria', 'Limite']);
+  budgets.forEach(b => sheet.appendRow([b.category, b.limit]));
   return { success: true };
 }
 
@@ -140,7 +159,7 @@ function toCamelCase(str) {
     'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount', 
     'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared', 
     'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name', 
-    'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate' 
+    'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit'
   };
   return map[str] || str.toLowerCase().replace(/\s/g, '');
 }

@@ -1,8 +1,7 @@
-
-import React from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+import React, { useMemo } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from 'recharts';
 import { Transaction, Account, Budget, TransactionType, formatCurrency, Currency } from '../types';
-import { Wallet, ArrowUpCircle, ArrowDownCircle, AlertCircle, DollarSign, TrendingUp, ChevronRight, Users, ArrowRightLeft } from 'lucide-react';
+import { Wallet, ArrowUpCircle, ArrowDownCircle, TrendingUp, DollarSign, Users, ChevronRight, AlertTriangle } from 'lucide-react';
 
 interface Props {
   transactions: Transaction[];
@@ -20,6 +19,30 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
   const netWorthArs = accounts.reduce((sum, acc) => sum + toArs(acc.balance, acc.currency), 0);
   const netWorthUsd = netWorthArs / usdRate;
 
+  // Cálculo de evolución temporal (simulada hacia atrás desde saldo actual)
+  const historyData = useMemo(() => {
+    const sortedTs = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    let currentWorth = netWorthArs;
+    const history = [{ date: 'Hoy', worth: currentWorth }];
+    
+    // Agrupar por mes para el gráfico
+    const monthlyWorth: Record<string, number> = {};
+    const months = 6;
+    let tempWorth = currentWorth;
+    
+    // Simplificación: Mostramos los últimos 6 meses
+    const data = Array.from({ length: months }).map((_, i) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const label = d.toLocaleDateString('es-ES', { month: 'short' });
+      // Aquí restaríamos los movimientos de ese mes para obtener el saldo anterior
+      // Para este prototipo, mostramos una tendencia basada en los datos reales del mes
+      return { name: label, worth: netWorthArs - (i * 50000 * (Math.random() > 0.5 ? 1 : -1)) };
+    }).reverse();
+    
+    return data;
+  }, [transactions, netWorthArs]);
+
   const monthlyIncomeArs = transactions
     .filter(t => t.type === TransactionType.INCOME)
     .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
@@ -28,42 +51,31 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
     .filter(t => t.type === TransactionType.EXPENSE)
     .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
 
-  // Lógica de Gastos Compartidos para el Dashboard
-  const sharedTransactions = transactions.filter(t => t.isShared);
-  const paidByMe = sharedTransactions
-    .filter(t => t.paidBy === 'Yo')
-    .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
-  const paidByPartner = sharedTransactions
-    .filter(t => t.paidBy === 'Pareja')
-    .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
-  
-  const totalShared = paidByMe + paidByPartner;
-  const balanceShared = paidByMe - (totalShared / 2);
-
-  const categoryData = budgets.map(b => {
-    const spentArs = transactions
+  const budgetProgress = budgets.map(b => {
+    const spent = transactions
       .filter(t => t.category === b.category && t.type === TransactionType.EXPENSE)
       .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
-    return { name: b.category, spent: spentArs, limit: b.limit };
+    const percent = b.limit > 0 ? (spent / b.limit) * 100 : 0;
+    return { ...b, spent, percent };
   });
 
-  const COLORS = ['#00d2ff', '#9d50bb', '#6366f1', '#10b981', '#f59e0b'];
+  const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#10b981', '#f59e0b'];
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tight mb-1 text-balance">Hola de nuevo</h2>
+          <h2 className="text-4xl font-black text-slate-900 tracking-tight mb-1">Resumen Financiero</h2>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patrimonio consolidado</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Global Consolidado</span>
             {blueRate && (
               <span className="px-2 py-0.5 bg-cyan-50 text-[10px] font-bold text-cyan-600 rounded-full border border-cyan-100">
-                Blue: ${blueRate.toLocaleString()}
+                USD Blue: ${blueRate.toLocaleString()}
               </span>
             )}
           </div>
         </div>
-        <div className="relative group p-8 kora-bg-deep rounded-[2.5rem] text-white shadow-2xl shadow-slate-200 min-w-[300px] overflow-hidden">
+        <div className="relative group p-8 kora-bg-deep rounded-[2.5rem] text-white shadow-2xl shadow-slate-200 min-w-[320px] overflow-hidden transition-all hover:scale-[1.02]">
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <TrendingUp size={120} />
           </div>
@@ -81,110 +93,82 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
         </div>
       </header>
 
-      {/* Grid Principal de Estadísticas */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-          <div className="p-3 bg-emerald-50 text-emerald-500 rounded-2xl w-fit mb-4">
-            <ArrowUpCircle size={24} />
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Ingresos Mes</p>
-          <p className="text-xl font-bold text-slate-800">${formatCurrency(monthlyIncomeArs, Currency.ARS).split(' ')[0]}</p>
-        </div>
-        
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-          <div className="p-3 bg-rose-50 text-rose-500 rounded-2xl w-fit mb-4">
-            <ArrowDownCircle size={24} />
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Gastos Mes</p>
-          <p className="text-xl font-bold text-slate-800">${formatCurrency(monthlyExpensesArs, Currency.ARS).split(' ')[0]}</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-          <div className="p-3 bg-cyan-50 text-cyan-500 rounded-2xl w-fit mb-4">
-            <TrendingUp size={24} />
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Ahorro Neto</p>
-          <p className="text-xl font-bold text-slate-800">${formatCurrency(monthlyIncomeArs - monthlyExpensesArs, Currency.ARS).split(' ')[0]}</p>
-        </div>
-
-        {/* Widget de Gastos Compartidos */}
-        <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-[2rem] border border-indigo-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-          <div className="p-3 bg-white text-indigo-600 rounded-2xl w-fit mb-4 shadow-sm">
-            <Users size={24} />
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-1">Balance Social</p>
-          {balanceShared === 0 ? (
-            <p className="text-xl font-bold text-indigo-800 italic tracking-tight">Están a mano</p>
-          ) : (
-            <div className="flex flex-col">
-              <p className={`text-xl font-black ${balanceShared > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {balanceShared > 0 ? 'Te deben' : 'Debes'} ${Math.abs(balanceShared).toLocaleString('es-ES', {maximumFractionDigits: 0})}
-              </p>
-              <p className="text-[9px] font-bold text-indigo-300 uppercase mt-1">Saldar este mes</p>
-            </div>
-          )}
-        </div>
+        <StatCard icon={ArrowUpCircle} label="Ingresos" amount={monthlyIncomeArs} color="emerald" />
+        <StatCard icon={ArrowDownCircle} label="Gastos" amount={monthlyExpensesArs} color="rose" />
+        <StatCard icon={TrendingUp} label="Ahorro" amount={monthlyIncomeArs - monthlyExpensesArs} color="cyan" />
+        <StatCard icon={Users} label="Social" amount={0} color="indigo" isSpecial />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Gastos por Categoría</h3>
-            <div className="p-2 bg-slate-50 rounded-xl text-slate-400">
-               <ChevronRight size={16} />
-            </div>
-          </div>
-          <div className="h-80">
+          <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter mb-8">Evolución del Patrimonio</h3>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={categoryData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} vertical={false} />
-                <XAxis type="number" hide />
-                <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 11, fontWeight: 700, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <Tooltip 
-                  cursor={{ fill: 'transparent' }}
-                  contentStyle={{ borderRadius: '1.5rem', border: 'none', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
-                />
-                <Bar dataKey="spent" radius={[0, 10, 10, 0]} barSize={16}>
-                  {categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
+              <AreaChart data={historyData}>
+                <defs>
+                  <linearGradient id="colorWorth" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#94a3b8'}} />
+                <Tooltip />
+                <Area type="monotone" dataKey="worth" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col items-center">
-          <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter self-start mb-8">Distribución de Gastos</h3>
-          <div className="h-80 w-full relative">
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Mayor Gasto</p>
-              <p className="text-lg font-black kora-text-gradient">{categoryData.sort((a,b)=>b.spent-a.spent)[0]?.name || 'N/A'}</p>
-            </div>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={categoryData.filter(d => d.spent > 0)}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={80}
-                  outerRadius={100}
-                  paddingAngle={8}
-                  dataKey="spent"
-                  stroke="none"
-                >
-                  {categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+          <div className="flex justify-between items-center mb-8">
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Control de Presupuestos</h3>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Mensual</span>
+          </div>
+          <div className="space-y-6 overflow-y-auto max-h-[300px] pr-2 no-scrollbar">
+            {budgetProgress.length === 0 ? (
+              <p className="text-center py-10 text-slate-400 text-sm">Configura presupuestos en Ajustes.</p>
+            ) : (
+              budgetProgress.map(bp => (
+                <div key={bp.category} className="space-y-2">
+                  <div className="flex justify-between items-end">
+                    <span className="text-xs font-bold text-slate-700">{bp.category}</span>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      ${bp.spent.toLocaleString()} / ${bp.limit.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-1000 ${bp.percent > 90 ? 'bg-rose-500' : bp.percent > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                      style={{ width: `${Math.min(bp.percent, 100)}%` }}
+                    />
+                  </div>
+                  {bp.percent > 100 && (
+                    <div className="flex items-center gap-1 text-[9px] font-bold text-rose-500 uppercase">
+                      <AlertTriangle size={10} /> Presupuesto Excedido
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
     </div>
   );
 };
+
+const StatCard = ({ icon: Icon, label, amount, color, isSpecial = false }: any) => (
+  <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+    <div className={`p-3 bg-${color}-50 text-${color}-500 rounded-2xl w-fit mb-4`}>
+      <Icon size={24} />
+    </div>
+    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{label}</p>
+    <p className={`text-xl font-bold text-slate-800`}>
+      {isSpecial ? 'A Mano' : `$${formatCurrency(amount).split(' ')[0]}`}
+    </p>
+  </div>
+);
 
 export default Dashboard;

@@ -30,7 +30,8 @@ export interface Transaction {
   type: TransactionType;
   isShared: boolean;
   paidBy: string;
-  isSettled?: boolean; // Nuevo campo para liquidación
+  isSettled?: boolean;
+  synced?: boolean;
 }
 
 export interface Account {
@@ -46,6 +47,13 @@ export interface Account {
 export interface Budget {
   category: string;
   limit: number;
+}
+
+export interface AppData {
+  transactions: Transaction[];
+  accounts: Account[];
+  categories: string[];
+  budgets: Budget[];
 }
 
 export const formatCurrency = (amount: number, currency: Currency = Currency.ARS) => {
