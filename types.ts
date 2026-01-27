@@ -29,7 +29,8 @@ export interface Transaction {
   destinationAccount?: string;
   type: TransactionType;
   isShared: boolean;
-  paidBy: string; // Cambiado de enum rígido a string para permitir configuración
+  paidBy: string;
+  isSettled?: boolean; // Nuevo campo para liquidación
 }
 
 export interface Account {
@@ -45,13 +46,6 @@ export interface Account {
 export interface Budget {
   category: string;
   limit: number;
-}
-
-export interface Investment {
-  ticker: string;
-  quantity: number;
-  purchasePrice: number;
-  broker: string;
 }
 
 export const formatCurrency = (amount: number, currency: Currency = Currency.ARS) => {

@@ -1,6 +1,5 @@
-
 /**
- * FinanceArch Backend - Google Apps Script
+ * Kora Backend - Google Apps Script
  */
 
 const SS = SpreadsheetApp.getActiveSpreadsheet();
@@ -11,10 +10,7 @@ const SHEETS = {
 };
 
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('FinanceArch')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return HtmlService.createHtmlOutput('Kora API Active').setTitle('Kora Backend');
 }
 
 function doPost(e) {
@@ -22,7 +18,8 @@ function doPost(e) {
   try {
     request = JSON.parse(e.postData.contents);
   } catch (err) {
-    request = e.parameter;
+    return ContentService.createTextOutput(JSON.stringify({ error: "Invalid JSON" }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
 
   const action = request.action;
@@ -35,12 +32,14 @@ function doPost(e) {
       case 'saveTransaction': result = saveTransaction(data); break;
       case 'saveAccount': result = saveAccount(data); break;
       case 'saveCategories': result = saveCategories(data); break;
-      default: result = { error: "Acción no reconocida" };
+      default: result = { error: "Action not recognized" };
     }
   } catch (err) {
     result = { error: err.message };
   }
 
+  // GAS no soporta headers CORS personalizados en ContentService fácilmente,
+  // pero devolver un TextOutput con el JSON es la forma estándar de evitar bloqueos.
   return ContentService.createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -52,7 +51,7 @@ function setupDatabase() {
 
   const tSheet = SS.getSheetByName(SHEETS.TRANSACTIONS);
   if (tSheet.getLastRow() === 0) {
-    tSheet.appendRow(['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable']);
+    tSheet.appendRow(['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado']);
   }
 
   const aSheet = SS.getSheetByName(SHEETS.ACCOUNTS);
@@ -73,11 +72,25 @@ function getAppData() {
 function saveTransaction(t) {
   setupDatabase();
   const sheet = SS.getSheetByName(SHEETS.TRANSACTIONS);
-  sheet.appendRow([
+  const data = sheet.getDataRange().getValues();
+  let rowIdx = -1;
+  
+  // Buscar si ya existe para actualizarlo
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === t.id) { rowIdx = i + 1; break; }
+  }
+
+  const vals = [
     t.id, t.date, t.concept, t.amount, t.currency, 
     t.category || 'Varios', t.sourceAccount, t.destinationAccount || '', 
-    t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo'
-  ]);
+    t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo', t.isSettled ? 'SI' : 'NO'
+  ];
+
+  if (rowIdx !== -1) {
+    sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  } else {
+    sheet.appendRow(vals);
+  }
   return { success: true };
 }
 
@@ -113,7 +126,7 @@ function getSheetData(sheetName) {
     let obj = {};
     headers.forEach((h, i) => {
       let val = row[i];
-      if (h === 'Compartido') val = (val === 'SI');
+      if (h === 'Compartido' || h === 'Saldado') val = (val === 'SI');
       if (val instanceof Date) val = val.toISOString().split('T')[0];
       obj[toCamelCase(h)] = val;
     });
@@ -122,6 +135,12 @@ function getSheetData(sheetName) {
 }
 
 function toCamelCase(str) {
-  const map = { 'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount', 'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount', 'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared', 'Responsable': 'paidBy', 'Nombre': 'name', 'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate' };
+  const map = { 
+    'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount', 
+    'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount', 
+    'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared', 
+    'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name', 
+    'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate' 
+  };
   return map[str] || str.toLowerCase().replace(/\s/g, '');
 }
