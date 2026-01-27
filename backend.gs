@@ -10,22 +10,36 @@ const SHEETS = {
   BUDGETS: 'Presupuestos'
 };
 
+/**
+ * Maneja las peticiones GET (JSONP Fallback)
+ */
 function doGet(e) {
-  // Soporte para JSONP si fuera necesario, aunque fetch standard es preferible
+  // Evitar error si se ejecuta manualmente en el editor de GAS
+  if (!e || !e.parameter) {
+    return HtmlService.createHtmlOutput('<h1>Kora API Active</h1><p>Esta URL es para uso exclusivo de la App.</p>');
+  }
+
+  // Soporte JSONP para lectura segura desde dominios externos
   if (e.parameter.callback) {
     const res = getAppData();
-    return ContentService.createTextOutput(e.parameter.callback + '(' + JSON.stringify(res) + ')')
+    const output = e.parameter.callback + '(' + JSON.stringify(res) + ')';
+    return ContentService.createTextOutput(output)
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
-  return HtmlService.createHtmlOutput('Kora API Active').setTitle('Kora Backend');
+
+  return ContentService.createTextOutput(JSON.stringify(getAppData()))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
+/**
+ * Maneja las peticiones POST principales
+ */
 function doPost(e) {
   let request;
   try {
     request = JSON.parse(e.postData.contents);
   } catch (err) {
-    return createJsonResponse({ error: "Invalid JSON" });
+    return createJsonResponse({ error: "Invalid JSON", details: err.message });
   }
 
   const { action, data } = request;
@@ -48,6 +62,8 @@ function doPost(e) {
 }
 
 function createJsonResponse(data) {
+  // GAS maneja los headers de CORS automáticamente al devolver JSON 
+  // desde una Web App desplegada para "Cualquiera".
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -99,8 +115,11 @@ function saveTransaction(t) {
     t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo', t.isSettled ? 'SI' : 'NO'
   ];
 
-  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
-  else sheet.appendRow(vals);
+  if (rowIdx !== -1) {
+    sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  } else {
+    sheet.appendRow(vals);
+  }
   return { success: true };
 }
 
@@ -113,8 +132,11 @@ function saveAccount(acc) {
     if (data[i][0] === acc.id) { rowIdx = i + 1; break; }
   }
   const vals = [acc.id, acc.name, acc.type, acc.balance, acc.currency, acc.closingDate || '', acc.dueDate || ''];
-  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, 7).setValues([vals]);
-  else sheet.appendRow(vals);
+  if (rowIdx !== -1) {
+    sheet.getRange(rowIdx, 1, 1, 7).setValues([vals]);
+  } else {
+    sheet.appendRow(vals);
+  }
   return { success: true };
 }
 

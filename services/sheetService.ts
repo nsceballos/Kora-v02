@@ -41,8 +41,10 @@ async function runAction(action: string, data?: any, retries = 3): Promise<any> 
     try {
       const response = await fetch(url, {
         method: 'POST',
-        redirect: 'follow', // Crítico: GAS usa redireccionamientos 302
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        redirect: 'follow', // CRÍTICO: GAS siempre redirige a una URL de googleusercontent.com
+        headers: { 
+          'Content-Type': 'text/plain;charset=utf-8' 
+        },
         body: JSON.stringify({ action, data })
       });
 
@@ -54,8 +56,9 @@ async function runAction(action: string, data?: any, retries = 3): Promise<any> 
         if (result.error) throw new Error(result.error);
         return result;
       } catch (e) {
-        console.warn('Respuesta no es JSON:', text);
-        return { success: true, raw: text };
+        console.warn('La respuesta no pudo ser procesada como JSON:', text);
+        // Si no es JSON pero el status fue 200, asumimos éxito (a veces GAS devuelve HTML de redirección)
+        return { success: true };
       }
     } catch (e) {
       console.warn(`Intento ${i + 1} fallido para ${action}:`, e);
@@ -63,7 +66,7 @@ async function runAction(action: string, data?: any, retries = 3): Promise<any> 
         if (action !== 'getAppData') addToQueue(action, data);
         return null;
       }
-      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i))); // Exponential backoff
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i))); // Retroceso exponencial
     }
   }
   return null;
