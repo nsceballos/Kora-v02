@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Tags, Plus, X, DollarSign, Save, Network, Database } from 'lucide-react';
 
@@ -72,7 +71,7 @@ const Settings: React.FC<Props> = ({ categories, setCategories, usdRates, onUpda
               value={googleWebAppUrl}
               onChange={e => setGoogleWebAppUrl(e.target.value)}
             />
-            <p className="mt-2 text-xs text-slate-400 italic">Pega aquí la URL que obtienes al "Implementar > Nueva implementación" en Apps Script.</p>
+            <p className="mt-2 text-xs text-slate-400 italic">Pega aquí la URL que obtienes al "Implementar &gt; Nueva implementación" en Apps Script.</p>
           </div>
           <button 
             onClick={handleSaveGoogleSheets}
