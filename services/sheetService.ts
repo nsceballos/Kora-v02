@@ -1,4 +1,3 @@
-
 import { Transaction, Account } from '../types';
 
 declare const google: any;
@@ -14,9 +13,9 @@ const isGasEnv = () => {
 };
 
 /**
- * Ejecuta una acción en el backend.
+ * Ejecuta una acción en el backend con lógica de reintento y validación.
  */
-async function runAction(action: string, data?: any): Promise<any> {
+async function runAction(action: string, data?: any, retries = 2): Promise<any> {
   if (isGasEnv()) {
     return new Promise((resolve, reject) => {
       google.script.run
@@ -26,34 +25,35 @@ async function runAction(action: string, data?: any): Promise<any> {
   } 
   
   const url = getWebAppUrl();
-  if (url && url.startsWith('http')) {
+  if (!url || !url.startsWith('http')) return null;
+
+  for (let i = 0; i <= retries; i++) {
     try {
-      await fetch(url, {
+      const response = await fetch(url, {
         method: 'POST',
-        mode: 'no-cors', 
-        headers: { 'Content-Type': 'text/plain' },
+        headers: { 'Content-Type': 'text/plain' }, // GAS requiere text/plain para evitar preflight excesivo
         body: JSON.stringify({ action, data })
       });
-      return { _isApiConfirmation: true };
+
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+      
+      const result = await response.json();
+      return result;
     } catch (e) {
-      console.warn("Error modo API:", e);
-      return null;
+      console.warn(`Intento ${i + 1} fallido para ${action}:`, e);
+      if (i === retries) return null;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Exponential backoff simple
     }
   }
   return null;
 }
 
 export const sheetService = {
-  /**
-   * Garantiza siempre devolver un objeto con arrays, evitando errores de findIndex.
-   */
   async getAppData(): Promise<{ transactions: Transaction[], accounts: Account[], categories: string[] }> {
     const fallback = { transactions: [], accounts: [], categories: [] };
     
     try {
       const result = await runAction('getAppData');
-      
-      // Si vienen datos de Google
       if (result && typeof result === 'object') {
         return {
           transactions: Array.isArray(result.transactions) ? result.transactions : [],
@@ -65,7 +65,6 @@ export const sheetService = {
       console.error("Error cargando de la nube:", e);
     }
 
-    // Fallback a Local Storage
     const stored = localStorage.getItem('finance_arch_data');
     if (stored) {
       try {

@@ -43,7 +43,7 @@ const Settings: React.FC<Props> = ({ categories, setCategories, usdRates, onUpda
 
   const handleSaveGoogleSheets = () => {
     localStorage.setItem('finance_arch_google_webapp_url', googleWebAppUrl);
-    alert("URL de Google Sheets guardada. Si estás en modo local, las escrituras se intentarán sincronizar.");
+    alert("URL de Google Sheets guardada.");
   };
 
   return (
@@ -71,7 +71,9 @@ const Settings: React.FC<Props> = ({ categories, setCategories, usdRates, onUpda
               value={googleWebAppUrl}
               onChange={e => setGoogleWebAppUrl(e.target.value)}
             />
-            <p className="mt-2 text-xs text-slate-400 italic">Pega aquí la URL que obtienes al "Implementar &gt; Nueva implementación" en Apps Script.</p>
+            <p className="mt-2 text-xs text-slate-400 italic">
+              Pega aquí la URL que obtienes al {"Implementar > Nueva implementación"} en Apps Script.
+            </p>
           </div>
           <button 
             onClick={handleSaveGoogleSheets}

@@ -1,4 +1,3 @@
-
 export enum TransactionType {
   EXPENSE = 'Gasto',
   INCOME = 'Ingreso',
@@ -30,7 +29,7 @@ export interface Transaction {
   destinationAccount?: string;
   type: TransactionType;
   isShared: boolean;
-  paidBy: 'Yo' | 'Pareja';
+  paidBy: string; // Cambiado de enum rígido a string para permitir configuración
 }
 
 export interface Account {
@@ -55,7 +54,6 @@ export interface Investment {
   broker: string;
 }
 
-// Helper para formato de moneda con punto como separador de miles
 export const formatCurrency = (amount: number, currency: Currency = Currency.ARS) => {
   return amount.toLocaleString('es-ES', {
     minimumFractionDigits: 2,

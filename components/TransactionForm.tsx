@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, ArrowRightLeft, DollarSign } from 'lucide-react';
+import { X, Save, AlertCircle } from 'lucide-react';
 import { Transaction, TransactionType, AccountType, Account, Currency } from '../types';
 
 interface Props {
@@ -25,24 +25,35 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
     paidBy: 'Yo'
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (editData) {
-      setFormData(editData);
-    }
+    if (editData) setFormData(editData);
   }, [editData]);
 
-  // Al cambiar la cuenta origen, intentamos pre-seleccionar la moneda de esa cuenta
   useEffect(() => {
     const acc = accounts.find(a => a.name === formData.sourceAccount);
-    if (acc) {
-      setFormData(prev => ({ ...prev, currency: acc.currency }));
-    }
+    if (acc) setFormData(prev => ({ ...prev, currency: acc.currency }));
   }, [formData.sourceAccount, accounts]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.concept || !formData.amount) return;
-    if ((formData.type === TransactionType.TRANSFER || formData.type === TransactionType.INVESTMENT) && !formData.destinationAccount) return;
+    setError(null);
+
+    if (!formData.concept) {
+      setError("El concepto es obligatorio.");
+      return;
+    }
+
+    if (!formData.amount || formData.amount <= 0) {
+      setError("El monto debe ser mayor a cero.");
+      return;
+    }
+
+    if ((formData.type === TransactionType.TRANSFER || formData.type === TransactionType.INVESTMENT) && !formData.destinationAccount) {
+      setError("Debes seleccionar una cuenta destino.");
+      return;
+    }
 
     onSubmit({
       ...formData,
@@ -66,6 +77,13 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 space-y-6 max-h-[80vh] overflow-y-auto">
+          {error && (
+            <div className="bg-rose-50 text-rose-600 p-4 rounded-xl flex items-center gap-3 text-sm font-bold border border-rose-100 animate-in shake duration-300">
+              <AlertCircle size={18} />
+              {error}
+            </div>
+          )}
+
           <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
             {Object.values(TransactionType).map(type => (
               <button
@@ -186,7 +204,7 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
             <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
               <div className="flex flex-col">
                 <span className="text-sm font-semibold text-slate-700">Gasto Compartido</span>
-                <span className="text-xs text-slate-500">Dividir 50/50 al final del mes</span>
+                <span className="text-xs text-slate-500">Dividir 50/50</span>
               </div>
               <input
                 type="checkbox"
@@ -194,13 +212,6 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
                 checked={formData.isShared}
                 onChange={e => setFormData({ ...formData, isShared: e.target.checked })}
               />
-            </div>
-          )}
-
-          {isCreditCard && (
-            <div className="flex items-start gap-3 p-4 bg-blue-50 text-blue-700 rounded-2xl border border-blue-100 text-sm">
-              <AlertCircle size={20} className="shrink-0 mt-0.5" />
-              <p>Al ser tarjeta de crédito, este monto se sumará a tu deuda total pero no restará efectivo hoy.</p>
             </div>
           )}
 
