@@ -1,11 +1,25 @@
-<div align="center">
+# Kora - Smart Finance 🚀
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Kora es una suite de gestión financiera personal diseñada para ser inteligente, visual y colaborativa.
 
-  <h1>Built with AI Studio</h2>
+## Características principales
+- **Gestión Multi-moneda**: Soporte para ARS y USD con tipos de cambio manuales (Oficial/Blue).
+- **Control de Cuentas**: Seguimiento de Débito, Crédito, Inversiones y Efectivo.
+- **Gastos Compartidos**: Sistema de división 50/50 ideal para parejas.
+- **Kora AI**: Integración con n8n para consultas inteligentes sobre tus finanzas.
+- **Sincronización Cloud**: Conexión con Google Sheets como base de datos persistente.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Tecnologías
+- React 19
+- Tailwind CSS
+- Lucide React (Iconos)
+- Recharts (Gráficos)
+- Vite (Build Tool)
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Instalación
+1. Clona el repositorio.
+2. Instala dependencias: `npm install`
+3. Inicia el servidor de desarrollo: `npm run dev`
 
-</div>
+## Configuración de Google Sheets
+Para usar la persistencia, despliega el archivo `backend.gs` incluido en este proyecto como una Web App en Google Apps Script y pega la URL resultante en la sección de Ajustes de Kora.
