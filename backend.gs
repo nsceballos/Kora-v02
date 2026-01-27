@@ -11,33 +11,40 @@ const SHEETS = {
 };
 
 /**
- * Maneja las peticiones GET (JSONP Fallback)
+ * GET Handler
  */
 function doGet(e) {
-  // Evitar error si se ejecuta manualmente en el editor de GAS
+  // Manejo robusto de parámetros inexistentes
   if (!e || !e.parameter) {
-    return HtmlService.createHtmlOutput('<h1>Kora API Active</h1><p>Esta URL es para uso exclusivo de la App.</p>');
+    return ContentService.createTextOutput(JSON.stringify({ status: 'active', message: 'Kora API is running' }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
 
-  // Soporte JSONP para lectura segura desde dominios externos
+  // JSONP Callback
   if (e.parameter.callback) {
     const res = getAppData();
-    const output = e.parameter.callback + '(' + JSON.stringify(res) + ')';
-    return ContentService.createTextOutput(output)
+    return ContentService.createTextOutput(e.parameter.callback + '(' + JSON.stringify(res) + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
 
+  // Default GET
   return ContentService.createTextOutput(JSON.stringify(getAppData()))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 /**
- * Maneja las peticiones POST principales
+ * POST Handler
  */
 function doPost(e) {
   let request;
+  
+  // Parseo seguro del body
   try {
-    request = JSON.parse(e.postData.contents);
+    if (e && e.postData && e.postData.contents) {
+      request = JSON.parse(e.postData.contents);
+    } else {
+      throw new Error("No data received");
+    }
   } catch (err) {
     return createJsonResponse({ error: "Invalid JSON", details: err.message });
   }
@@ -55,38 +62,32 @@ function doPost(e) {
       default: result = { error: "Action '" + action + "' not recognized" };
     }
   } catch (err) {
-    result = { error: err.message };
+    result = { error: err.message, stack: err.stack };
   }
 
   return createJsonResponse(result);
 }
 
 function createJsonResponse(data) {
-  // GAS maneja los headers de CORS automáticamente al devolver JSON 
-  // desde una Web App desplegada para "Cualquiera".
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+// --- Database Logic ---
 
 function setupDatabase() {
   Object.values(SHEETS).forEach(name => {
     if (!SS.getSheetByName(name)) SS.insertSheet(name);
   });
-
-  const tSheet = SS.getSheetByName(SHEETS.TRANSACTIONS);
-  if (tSheet.getLastRow() === 0) {
-    tSheet.appendRow(['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado']);
-  }
-
-  const aSheet = SS.getSheetByName(SHEETS.ACCOUNTS);
-  if (aSheet.getLastRow() === 0) {
-    aSheet.appendRow(['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
-  }
   
-  const bSheet = SS.getSheetByName(SHEETS.BUDGETS);
-  if (bSheet.getLastRow() === 0) {
-    bSheet.appendRow(['Categoria', 'Limite']);
-  }
+  initSheet(SHEETS.TRANSACTIONS, ['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado']);
+  initSheet(SHEETS.ACCOUNTS, ['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
+  initSheet(SHEETS.BUDGETS, ['Categoria', 'Limite']);
+}
+
+function initSheet(name, headers) {
+  const sheet = SS.getSheetByName(name);
+  if (sheet.getLastRow() === 0) sheet.appendRow(headers);
 }
 
 function getAppData() {
@@ -106,7 +107,7 @@ function saveTransaction(t) {
   let rowIdx = -1;
   
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === t.id) { rowIdx = i + 1; break; }
+    if (String(data[i][0]) === String(t.id)) { rowIdx = i + 1; break; }
   }
 
   const vals = [
@@ -115,12 +116,9 @@ function saveTransaction(t) {
     t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo', t.isSettled ? 'SI' : 'NO'
   ];
 
-  if (rowIdx !== -1) {
-    sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
-  } else {
-    sheet.appendRow(vals);
-  }
-  return { success: true };
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  else sheet.appendRow(vals);
+  return { success: true, id: t.id };
 }
 
 function saveAccount(acc) {
@@ -129,15 +127,12 @@ function saveAccount(acc) {
   const data = sheet.getDataRange().getValues();
   let rowIdx = -1;
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === acc.id) { rowIdx = i + 1; break; }
+    if (String(data[i][0]) === String(acc.id)) { rowIdx = i + 1; break; }
   }
   const vals = [acc.id, acc.name, acc.type, acc.balance, acc.currency, acc.closingDate || '', acc.dueDate || ''];
-  if (rowIdx !== -1) {
-    sheet.getRange(rowIdx, 1, 1, 7).setValues([vals]);
-  } else {
-    sheet.appendRow(vals);
-  }
-  return { success: true };
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  else sheet.appendRow(vals);
+  return { success: true, id: acc.id };
 }
 
 function saveCategories(categories) {
@@ -145,7 +140,9 @@ function saveCategories(categories) {
   const sheet = SS.getSheetByName(SHEETS.CATEGORIES);
   sheet.clear();
   sheet.appendRow(['Nombre']);
-  categories.filter(c => c).forEach(c => sheet.appendRow([c]));
+  if (categories && categories.length) {
+    categories.filter(c => c).forEach(c => sheet.appendRow([c]));
+  }
   return { success: true };
 }
 
@@ -154,7 +151,9 @@ function saveBudgets(budgets) {
   const sheet = SS.getSheetByName(SHEETS.BUDGETS);
   sheet.clear();
   sheet.appendRow(['Categoria', 'Limite']);
-  budgets.forEach(b => sheet.appendRow([b.category, b.limit]));
+  if (budgets && budgets.length) {
+    budgets.forEach(b => sheet.appendRow([b.category, b.limit]));
+  }
   return { success: true };
 }
 

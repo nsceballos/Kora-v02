@@ -16,10 +16,15 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories })
   const filteredTransactions = useMemo(() => {
     return transactions
       .filter(t => {
-        const matchesSearch = t.concept.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            t.category.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesCategory = filterCategory === 'all' || t.category === filterCategory;
+        // Uso de Optional Chaining y valores por defecto para evitar crashes
+        const concept = t.concept || '';
+        const category = t.category || '';
+        
+        const matchesSearch = concept.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            category.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesCategory = filterCategory === 'all' || category === filterCategory;
         const matchesType = filterType === 'all' || t.type === filterType;
+        
         return matchesSearch && matchesCategory && matchesType;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

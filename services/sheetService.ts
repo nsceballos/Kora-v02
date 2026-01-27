@@ -15,14 +15,20 @@ const isGasEnv = () => {
 /**
  * Cola de sincronización para soporte offline-first
  */
-const getQueue = (): any[] => JSON.parse(localStorage.getItem('kora_sync_queue') || '[]');
+const getQueue = (): any[] => {
+  try {
+    return JSON.parse(localStorage.getItem('kora_sync_queue') || '[]');
+  } catch { return []; }
+};
+
 const addToQueue = (action: string, data: any) => {
   const queue = getQueue();
   queue.push({ action, data, timestamp: Date.now() });
   localStorage.setItem('kora_sync_queue', JSON.stringify(queue));
 };
 
-async function runAction(action: string, data?: any, retries = 3): Promise<any> {
+async function runAction(action: string, data?: any, retries = 1): Promise<any> {
+  // 1. Entorno nativo GAS (si se ejecutara dentro de Sheets/Sidebar)
   if (isGasEnv()) {
     return new Promise((resolve, reject) => {
       google.script.run
@@ -31,20 +37,25 @@ async function runAction(action: string, data?: any, retries = 3): Promise<any> 
     });
   } 
   
+  // 2. Validación de URL
   const url = getWebAppUrl();
   if (!url || !url.startsWith('http')) {
-    if (action !== 'getAppData') addToQueue(action, data);
+    console.warn("Kora: No hay URL configurada o es inválida.");
+    // Si no es una lectura de datos, lo encolamos para cuando el usuario ponga la URL
+    if (action !== 'getAppData') {
+      addToQueue(action, data);
+      return { success: true, offline: true }; // Simulamos éxito
+    }
     return null;
   }
 
+  // 3. Intento de Fetch
   for (let i = 0; i <= retries; i++) {
     try {
       const response = await fetch(url, {
         method: 'POST',
-        redirect: 'follow', // CRÍTICO: GAS siempre redirige a una URL de googleusercontent.com
-        headers: { 
-          'Content-Type': 'text/plain;charset=utf-8' 
-        },
+        redirect: 'follow', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, data })
       });
 
@@ -55,18 +66,28 @@ async function runAction(action: string, data?: any, retries = 3): Promise<any> 
         const result = JSON.parse(text);
         if (result.error) throw new Error(result.error);
         return result;
-      } catch (e) {
-        console.warn('La respuesta no pudo ser procesada como JSON:', text);
-        // Si no es JSON pero el status fue 200, asumimos éxito (a veces GAS devuelve HTML de redirección)
-        return { success: true };
+      } catch (jsonError) {
+        // Si el servidor devuelve 200 OK pero no es JSON (común en GAS con redirects), asumimos éxito.
+        console.warn('Respuesta no-JSON recibida (asumiendo éxito por status 200):', text.substring(0, 50));
+        return { success: true, warning: 'non-json-response' };
       }
+
     } catch (e) {
       console.warn(`Intento ${i + 1} fallido para ${action}:`, e);
+      
+      // Si fallan todos los intentos
       if (i === retries) {
-        if (action !== 'getAppData') addToQueue(action, data);
-        return null;
+        // Si NO es pedir datos (es guardar), lo guardamos en cola y devolvemos éxito falso al UI
+        // para que la UI optimista no se preocupe.
+        if (action !== 'getAppData') {
+          console.log(`Guardando ${action} en cola offline.`);
+          addToQueue(action, data);
+          return { success: true, queued: true };
+        }
+        return null; // Si era getAppData, fallamos real.
       }
-      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i))); // Retroceso exponencial
+      
+      await new Promise(r => setTimeout(r, 1000)); // Esperar 1s antes de reintentar
     }
   }
   return null;
@@ -78,18 +99,19 @@ export const sheetService = {
     
     try {
       const result = await runAction('getAppData');
-      if (result && typeof result === 'object') {
+      if (result && (result.transactions || result.accounts)) {
         const data = {
           transactions: Array.isArray(result.transactions) ? result.transactions : [],
           accounts: Array.isArray(result.accounts) ? result.accounts : [],
           categories: Array.isArray(result.categories) ? result.categories : [],
           budgets: Array.isArray(result.budgets) ? result.budgets : []
         };
+        // Cachear datos exitosos
         localStorage.setItem('finance_arch_data', JSON.stringify(data));
         return data;
       }
     } catch (e) {
-      console.error("Error cargando de la nube:", e);
+      console.error("Error cargando de la nube, usando caché:", e);
     }
 
     const stored = localStorage.getItem('finance_arch_data');
@@ -101,12 +123,26 @@ export const sheetService = {
     if (queue.length === 0) return;
     
     console.log(`Sincronizando ${queue.length} acciones pendientes...`);
-    const remaining = [];
+    
+    // Procesamos la cola secuencialmente para mantener orden
+    const newQueue = [];
     for (const item of queue) {
-      const success = await runAction(item.action, item.data, 1);
-      if (!success) remaining.push(item);
+      try {
+        const result = await runAction(item.action, item.data, 0); // 0 reintentos para no bloquear
+        // Si runAction devuelve null (fallo total) lo mantenemos. Si devuelve objeto (éxito o queued), lo sacamos.
+        // Pero espera, si devuelve queued=true es que falló de nuevo.
+        if (!result || result.queued) {
+           newQueue.push(item);
+        }
+      } catch {
+        newQueue.push(item);
+      }
     }
-    localStorage.setItem('kora_sync_queue', JSON.stringify(remaining));
+    
+    // Actualizar cola con los que fallaron de nuevo
+    if (newQueue.length !== queue.length) {
+      localStorage.setItem('kora_sync_queue', JSON.stringify(newQueue));
+    }
   },
 
   async saveTransaction(t: Transaction): Promise<boolean> {

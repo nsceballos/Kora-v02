@@ -45,14 +45,22 @@ const App: React.FC = () => {
       setIsSyncing(true);
       setSyncError(null);
       
-      // Intentar sincronizar cola offline primero
-      await sheetService.flushQueue();
+      // Intentar sincronizar cola offline primero de forma silenciosa
+      sheetService.flushQueue().catch(console.error);
       
       const data = await sheetService.getAppData();
-      setTransactions(data.transactions);
-      setAccounts(data.accounts);
-      if (data.categories?.length > 0) setCategories(data.categories);
-      if (data.budgets?.length > 0) setBudgets(data.budgets);
+      
+      // Validamos si la respuesta es estructuralmente válida, incluso si está vacía (usuario nuevo)
+      if (data && Array.isArray(data.transactions) && Array.isArray(data.accounts)) {
+        setTransactions(data.transactions);
+        setAccounts(data.accounts);
+        if (data.categories?.length > 0) setCategories(data.categories);
+        if (data.budgets?.length > 0) setBudgets(data.budgets);
+      } else {
+        // Fallback: Si la estructura no es válida, no sobreescribimos el estado local
+        // a menos que sea el primer inicio
+        if (transactions.length === 0) console.warn("Datos remotos inválidos o estructura desconocida.");
+      }
 
       const savedRates = localStorage.getItem('finance_arch_rates');
       if (savedRates) setUsdRates(JSON.parse(savedRates));
@@ -60,7 +68,8 @@ const App: React.FC = () => {
       const savedWebhook = localStorage.getItem('finance_arch_n8n_webhook');
       if (savedWebhook) setN8nWebhookUrl(savedWebhook);
     } catch (e) {
-      setSyncError("Error de conexión. Trabajando en modo local.");
+      console.error("Error init:", e);
+      setSyncError("Modo Offline");
     } finally {
       setIsLoading(false);
       setIsSyncing(false);
@@ -69,26 +78,62 @@ const App: React.FC = () => {
 
   useEffect(() => { init(); }, [init]);
 
+  const showSuccessToast = () => {
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
   const saveTransaction = async (newT: Transaction) => {
-    setIsSyncing(true);
+    // Optimistic Update
     let updatedTransactions = [...transactions];
     if (editingTransaction) {
       updatedTransactions = transactions.filter(t => t.id !== editingTransaction.id);
-      updateBalanceLocal(editingTransaction, true);
+      updateBalanceLocal(editingTransaction, true); // Revertir saldo anterior
     }
-    updatedTransactions.push({ ...newT, synced: false });
+    
+    const transactionToSave = { ...newT, synced: false };
+    updatedTransactions.push(transactionToSave);
+    
+    // Actualizar estado visual inmediatamente
     setTransactions(updatedTransactions);
-    updateBalanceLocal(newT, false);
+    updateBalanceLocal(newT, false); // Aplicar nuevo saldo
+    
     setIsFormOpen(false);
     setEditingTransaction(null);
+    setIsSyncing(true);
 
     try {
-      const success = await sheetService.saveTransaction(newT);
-      if (success) {
-        setTransactions(prev => prev.map(t => t.id === newT.id ? { ...t, synced: true } : t));
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 3000);
-      }
+      // Intentar guardar en segundo plano
+      await sheetService.saveTransaction(newT);
+      setTransactions(prev => prev.map(t => t.id === newT.id ? { ...t, synced: true } : t));
+      showSuccessToast();
+    } catch (e) {
+      console.error("Error guardando transacción:", e);
+      // No revertimos la UI, el servicio ya lo puso en cola (Queue)
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSaveAccount = async (acc: Account) => {
+    // Optimistic Update: Actualizar UI inmediatamente
+    const exists = accounts.find(a => a.id === acc.id);
+    let newAccounts;
+    
+    if (exists) {
+      newAccounts = accounts.map(a => a.id === acc.id ? acc : a);
+    } else {
+      newAccounts = [...accounts, acc];
+    }
+    
+    setAccounts(newAccounts);
+    setIsSyncing(true);
+
+    try {
+      await sheetService.saveAccount(acc);
+      showSuccessToast();
+    } catch (e) {
+      console.error("Sync error accounts:", e);
     } finally {
       setIsSyncing(false);
     }
@@ -96,7 +141,12 @@ const App: React.FC = () => {
 
   const handleUpdateBudgets = async (newBudgets: Budget[]) => {
     setBudgets(newBudgets);
-    await sheetService.saveBudgets(newBudgets);
+    setIsSyncing(true);
+    try {
+      await sheetService.saveBudgets(newBudgets);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const updateBalanceLocal = (t: Transaction, reverse: boolean) => {
@@ -196,7 +246,7 @@ const App: React.FC = () => {
           <div className="max-w-6xl mx-auto">
             {view === 'dashboard' && <Dashboard transactions={transactions} accounts={accounts} budgets={budgets} usdRate={usdRates.official} blueRate={usdRates.blue} />}
             {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} />}
-            {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={(a) => sheetService.saveAccount(a).then(init)} onUpdateAccount={(a) => sheetService.saveAccount(a).then(init)} />}
+            {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} />}
             {view === 'shared' && <SharedExpenses transactions={transactions} usdRate={usdRates.official} onSettle={init} />}
             {view === 'settings' && (
               <Settings 
@@ -225,7 +275,7 @@ const App: React.FC = () => {
       {showToast && (
         <div className="fixed top-8 right-8 bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 z-[200]">
           <CheckCircle2 size={24} className="text-emerald-400" />
-          <p className="text-xs font-bold uppercase tracking-widest">Sincronizado</p>
+          <p className="text-xs font-bold uppercase tracking-widest">Guardado</p>
         </div>
       )}
 
