@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, Plus, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { Budget } from '../types';
+import { Tags, Plus, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, Users as UsersIcon } from 'lucide-react';
+import { Budget, UserConfig, USER_COLORS } from '../types';
 
 interface Props {
   categories: string[];
@@ -11,19 +11,32 @@ interface Props {
   onUpdateRates: (rates: { blue: number; official: number }) => void;
   n8nWebhookUrl: string;
   onUpdateWebhookUrl: (url: string) => void;
+  users: UserConfig[];
+  onUpdateUsers: (users: UserConfig[]) => void;
 }
 
-const Settings: React.FC<Props> = ({ 
-  categories, setCategories, 
+const COLOR_BG: Record<UserConfig['color'], string> = {
+  indigo: 'bg-indigo-500', rose: 'bg-rose-500', emerald: 'bg-emerald-500',
+  amber: 'bg-amber-500', cyan: 'bg-cyan-500', purple: 'bg-purple-500',
+};
+const COLOR_RING: Record<UserConfig['color'], string> = {
+  indigo: 'ring-indigo-500', rose: 'ring-rose-500', emerald: 'ring-emerald-500',
+  amber: 'ring-amber-500', cyan: 'ring-cyan-500', purple: 'ring-purple-500',
+};
+
+const Settings: React.FC<Props> = ({
+  categories, setCategories,
   budgets, setBudgets,
-  usdRates, onUpdateRates, 
-  n8nWebhookUrl, onUpdateWebhookUrl 
+  usdRates, onUpdateRates,
+  n8nWebhookUrl, onUpdateWebhookUrl,
+  users, onUpdateUsers,
 }) => {
   const [newCat, setNewCat] = useState('');
   const [localRates, setLocalRates] = useState(usdRates);
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
   const [googleWebAppUrl, setGoogleWebAppUrl] = useState('');
   const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
+  const [localUsers, setLocalUsers] = useState<UserConfig[]>(users);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -59,9 +72,14 @@ const Settings: React.FC<Props> = ({
     onUpdateRates(localRates);
     onUpdateWebhookUrl(localWebhook);
     setBudgets(localBudgets);
+    onUpdateUsers(localUsers);
     localStorage.setItem('finance_arch_google_webapp_url', googleWebAppUrl.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const updateUser = (id: string, patch: Partial<UserConfig>) => {
+    setLocalUsers(prev => prev.map(u => u.id === id ? { ...u, ...patch } : u));
   };
 
   return (
@@ -140,6 +158,62 @@ const Settings: React.FC<Props> = ({
                     value={localBudgets.find(b => b.category === cat)?.limit || 0}
                     onChange={e => updateBudget(cat, parseFloat(e.target.value))}
                   />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Usuarios ── */}
+        <section className="space-y-6 lg:col-span-2">
+          <SectionHeader icon={UsersIcon} title="Usuarios" color="indigo" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {localUsers.map((user, i) => (
+              <div key={user.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-10 h-10 rounded-xl ${COLOR_BG[user.color]} flex items-center justify-center text-white font-black text-lg`}>
+                    {user.name[0]?.toUpperCase() || '?'}
+                  </div>
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Usuario {i + 1}</span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Nombre</label>
+                  <input
+                    type="text"
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={user.name}
+                    onChange={e => updateUser(user.id, { name: e.target.value })}
+                    placeholder="Tu nombre"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">PIN (4 dígitos, opcional)</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono tracking-[0.4em] focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={user.pin}
+                    onChange={e => updateUser(user.id, { pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                    placeholder="Sin PIN"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400 italic">Si está vacío, no se requiere PIN para ingresar.</p>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Color del perfil</label>
+                  <div className="flex gap-2">
+                    {USER_COLORS.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => updateUser(user.id, { color: c })}
+                        className={`w-7 h-7 rounded-full ${COLOR_BG[c]} transition-all ${user.color === c ? `ring-2 ring-offset-2 ${COLOR_RING[c]} scale-110` : 'opacity-50 hover:opacity-80'}`}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}

@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  LayoutDashboard, 
-  Receipt, 
-  Wallet, 
-  Users, 
-  BrainCircuit, 
+import {
+  LayoutDashboard,
+  Receipt,
+  Wallet,
+  Users,
+  BrainCircuit,
   PlusCircle,
   Settings as SettingsIcon,
   RefreshCw,
   CheckCircle2,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  LogOut,
 } from 'lucide-react';
-import { Transaction, TransactionType, Account, Currency, Budget } from './types';
+import { Transaction, TransactionType, Account, Currency, Budget, UserConfig, DEFAULT_USERS } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionsList from './components/TransactionsList';
 import AccountsManager from './components/AccountsManager';
@@ -21,6 +22,7 @@ import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
 import { sheetService } from './services/sheetService';
+import LoginScreen from './components/LoginScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
@@ -35,6 +37,50 @@ const App: React.FC = () => {
   const [usdRates, setUsdRates] = useState({ blue: 1240, official: 980 });
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('');
   
+  // ── Auth ──────────────────────────────────────────────────
+  const [users, setUsers] = useState<UserConfig[]>(DEFAULT_USERS);
+  const [currentUser, setCurrentUser] = useState<UserConfig | null>(null);
+
+  useEffect(() => {
+    // Cargar config de usuarios
+    try {
+      const saved = localStorage.getItem('kora_users_config');
+      if (saved) setUsers(JSON.parse(saved));
+    } catch {}
+    // Restaurar sesión activa
+    try {
+      const session = sessionStorage.getItem('kora_session');
+      if (session) setCurrentUser(JSON.parse(session));
+    } catch {}
+  }, []);
+
+  const handleLogin = (user: UserConfig) => {
+    sessionStorage.setItem('kora_session', JSON.stringify(user));
+    setCurrentUser(user);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('kora_session');
+    setCurrentUser(null);
+    setTransactions([]);
+    setAccounts([]);
+    setIsLoading(true);
+  };
+
+  const handleUpdateUsers = (updated: UserConfig[]) => {
+    setUsers(updated);
+    localStorage.setItem('kora_users_config', JSON.stringify(updated));
+    // Si el usuario actual cambió de nombre, actualizar la sesión
+    if (currentUser) {
+      const me = updated.find(u => u.id === currentUser.id);
+      if (me) {
+        setCurrentUser(me);
+        sessionStorage.setItem('kora_session', JSON.stringify(me));
+      }
+    }
+  };
+  // ──────────────────────────────────────────────────────────
+
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -78,7 +124,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { init(); }, [init]);
+  useEffect(() => { if (currentUser) init(); }, [currentUser, init]);
 
   const showSuccessToast = () => {
     setShowToast(true);
@@ -226,6 +272,10 @@ const App: React.FC = () => {
     { id: 'ai',          label: 'Kora AI',        shortLabel: 'IA',        icon: BrainCircuit }
   ];
 
+  if (!currentUser) {
+    return <LoginScreen users={users} onLogin={handleLogin} />;
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900">
@@ -286,10 +336,24 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3">
-             <div className="p-2 bg-slate-50 rounded-full text-slate-400 hover:bg-slate-100 transition-colors">
-               <RefreshCw size={18} onClick={init} className={`cursor-pointer ${isSyncing ? 'animate-spin' : ''}`} />
-             </div>
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-slate-50 rounded-full text-slate-400 hover:bg-slate-100 transition-colors cursor-pointer" onClick={init}>
+              <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+            </div>
+            {/* Avatar + nombre del usuario activo */}
+            <div className="flex items-center gap-2 pl-1">
+              <div className={`w-7 h-7 rounded-lg bg-${currentUser.color}-500 flex items-center justify-center text-white text-xs font-black`}>
+                {currentUser.name[0]?.toUpperCase()}
+              </div>
+              <span className="text-sm font-bold text-slate-600 hidden sm:block">{currentUser.name}</span>
+              <button
+                onClick={handleLogout}
+                title="Cerrar sesión"
+                className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -298,13 +362,22 @@ const App: React.FC = () => {
             {view === 'dashboard' && <Dashboard transactions={transactions} accounts={accounts} budgets={budgets} usdRate={usdRates.official} blueRate={usdRates.blue} />}
             {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} onDelete={handleDeleteTransaction} />}
             {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} onDeleteAccount={handleDeleteAccount} />}
-            {view === 'shared' && <SharedExpenses transactions={transactions} usdRate={usdRates.official} onSettle={handleSettleSharedExpenses} />}
+            {view === 'shared' && (
+              <SharedExpenses
+                transactions={transactions}
+                usdRate={usdRates.official}
+                onSettle={handleSettleSharedExpenses}
+                currentUserName={currentUser.name}
+                partnerName={users.find(u => u.id !== currentUser.id)?.name ?? 'Pareja'}
+              />
+            )}
             {view === 'settings' && (
-              <Settings 
-                categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)} 
+              <Settings
+                categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)}
                 budgets={budgets} setBudgets={handleUpdateBudgets}
-                usdRates={usdRates} onUpdateRates={setUsdRates} 
-                n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl} 
+                usdRates={usdRates} onUpdateRates={setUsdRates}
+                n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl}
+                users={users} onUpdateUsers={handleUpdateUsers}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}
@@ -354,7 +427,15 @@ const App: React.FC = () => {
       )}
 
       {(isFormOpen || editingTransaction) && (
-        <TransactionForm onClose={() => { setIsFormOpen(false); setEditingTransaction(null); }} onSubmit={saveTransaction} accounts={accounts} categories={categories} editData={editingTransaction || undefined} />
+        <TransactionForm
+          onClose={() => { setIsFormOpen(false); setEditingTransaction(null); }}
+          onSubmit={saveTransaction}
+          accounts={accounts}
+          categories={categories}
+          editData={editingTransaction || undefined}
+          currentUserName={currentUser.name}
+          partnerName={users.find(u => u.id !== currentUser.id)?.name ?? 'Pareja'}
+        />
       )}
     </div>
   );

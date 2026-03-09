@@ -8,9 +8,11 @@ interface Props {
   accounts: Account[];
   categories: string[];
   editData?: Transaction;
+  currentUserName: string;
+  partnerName: string;
 }
 
-const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categories, editData }) => {
+const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categories, editData, currentUserName, partnerName }) => {
   const [formData, setFormData] = useState<Partial<Transaction>>({
     date: new Date().toISOString().split('T')[0],
     concept: '',
@@ -22,7 +24,7 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
     destinationAccount: '',
     type: TransactionType.EXPENSE,
     isShared: false,
-    paidBy: 'Yo'
+    paidBy: currentUserName,
   });
 
   const [error, setError] = useState<string | null>(null);
@@ -201,17 +203,43 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
           </div>
 
           {!isInternalMovement && (
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-              <div className="flex flex-col">
-                <span className="text-sm font-semibold text-slate-700">Gasto Compartido</span>
-                <span className="text-xs text-slate-500">Dividir 50/50</span>
+            <div className="space-y-3">
+              {/* Toggle gasto compartido */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold text-slate-700">Gasto Compartido</span>
+                  <span className="text-xs text-slate-500">Dividir 50/50 con {partnerName}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 accent-indigo-600 rounded"
+                  checked={formData.isShared}
+                  onChange={e => setFormData({ ...formData, isShared: e.target.checked, paidBy: e.target.checked ? currentUserName : currentUserName })}
+                />
               </div>
-              <input
-                type="checkbox"
-                className="w-5 h-5 accent-indigo-600 rounded"
-                checked={formData.isShared}
-                onChange={e => setFormData({ ...formData, isShared: e.target.checked })}
-              />
+
+              {/* Selector de quién pagó (solo visible si es gasto compartido) */}
+              {formData.isShared && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">¿Quién pagó?</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, paidBy: currentUserName })}
+                      className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${formData.paidBy === currentUserName ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'}`}
+                    >
+                      {currentUserName} (yo)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, paidBy: partnerName })}
+                      className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${formData.paidBy === partnerName ? 'bg-rose-500 text-white shadow-sm' : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'}`}
+                    >
+                      {partnerName}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
