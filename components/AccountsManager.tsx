@@ -1,15 +1,16 @@
 
 import React, { useState } from 'react';
 import { Account, AccountType, formatCurrency, Currency } from '../types';
-import { CreditCard, Wallet, Landmark, TrendingUp, Plus, X, Edit3 } from 'lucide-react';
+import { CreditCard, Wallet, Landmark, TrendingUp, Plus, X, Edit3, Trash2 } from 'lucide-react';
 
 interface Props {
   accounts: Account[];
   onAddAccount: (acc: Account) => void;
   onUpdateAccount: (acc: Account) => void;
+  onDeleteAccount: (id: string) => void;
 }
 
-const AccountsManager: React.FC<Props> = ({ accounts, onAddAccount, onUpdateAccount }) => {
+const AccountsManager: React.FC<Props> = ({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Account>>({
@@ -58,7 +59,7 @@ const AccountsManager: React.FC<Props> = ({ accounts, onAddAccount, onUpdateAcco
     if (editingId) {
       onUpdateAccount({ ...formData, id: editingId } as Account);
     } else {
-      onAddAccount({ ...formData, id: Math.random().toString(36).substr(2, 9) } as Account);
+      onAddAccount({ ...formData, id: crypto.randomUUID() } as Account);
     }
     resetForm();
   };
@@ -151,12 +152,26 @@ const AccountsManager: React.FC<Props> = ({ accounts, onAddAccount, onUpdateAcco
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {accounts.map(acc => (
           <div key={acc.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow group relative">
-            <button 
-              onClick={() => handleEdit(acc)}
-              className="absolute top-4 right-4 p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl opacity-0 group-hover:opacity-100 transition-all"
-            >
-              <Edit3 size={18} />
-            </button>
+            <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+              <button
+                onClick={() => handleEdit(acc)}
+                className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                title="Editar cuenta"
+              >
+                <Edit3 size={18} />
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`¿Eliminar la cuenta "${acc.name}"? Esta acción no se puede deshacer.`)) {
+                    onDeleteAccount(acc.id);
+                  }
+                }}
+                className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                title="Eliminar cuenta"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
 
             <div className="flex justify-between items-start mb-8">
               <div className={`p-3 rounded-2xl border ${getStyle(acc.type)}`}>

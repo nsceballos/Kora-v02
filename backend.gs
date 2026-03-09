@@ -59,6 +59,8 @@ function doPost(e) {
       case 'saveAccount': result = saveAccount(data); break;
       case 'saveCategories': result = saveCategories(data); break;
       case 'saveBudgets': result = saveBudgets(data); break;
+      case 'deleteTransaction': result = deleteRow(SHEETS.TRANSACTIONS, data.id); break;
+      case 'deleteAccount': result = deleteRow(SHEETS.ACCOUNTS, data.id); break;
       default: result = { error: "Action '" + action + "' not recognized" };
     }
   } catch (err) {
@@ -175,12 +177,24 @@ function getSheetData(sheetName) {
 }
 
 function toCamelCase(str) {
-  const map = { 
-    'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount', 
-    'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount', 
-    'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared', 
-    'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name', 
+  const map = {
+    'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount',
+    'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount',
+    'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared',
+    'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name',
     'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit'
   };
   return map[str] || str.toLowerCase().replace(/\s/g, '');
+}
+
+function deleteRow(sheetName, id) {
+  const sheet = SS.getSheetByName(sheetName);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      return { success: true };
+    }
+  }
+  return { success: false, error: 'Row not found' };
 }

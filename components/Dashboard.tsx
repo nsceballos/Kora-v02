@@ -19,20 +19,29 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
   const netWorthArs = accounts.reduce((sum, acc) => sum + toArs(acc.balance, acc.currency), 0);
   const netWorthUsd = netWorthArs / usdRate;
 
-  // Cálculo de evolución temporal (simulada hacia atrás desde saldo actual)
+  // Cálculo de evolución temporal real: parte del patrimonio actual y revierte
+  // las transacciones futuras para reconstruir el saldo mes a mes.
   const historyData = useMemo(() => {
-    // En una app real, esto calcularía el saldo histórico real día a día.
-    // Para la demo, generamos una tendencia visual basada en el patrimonio actual.
+    const currentNetWorth = accounts.reduce((sum, acc) => sum + toArs(acc.balance, acc.currency), 0);
     const months = 6;
     return Array.from({ length: months }).map((_, i) => {
       const d = new Date();
+      d.setDate(1);
       d.setMonth(d.getMonth() - i);
       const label = d.toLocaleDateString('es-ES', { month: 'short' });
-      // Variación simulada para el gráfico
-      const variation = Math.sin(i) * (netWorthArs * 0.05); 
-      return { name: label, worth: netWorthArs - (i * (netWorthArs * 0.02)) + variation };
+      const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+
+      // Revertir transacciones posteriores al fin de ese mes para reconstruir el saldo
+      const futureTransactions = transactions.filter(t => new Date(t.date) > endOfMonth);
+      let worth = currentNetWorth;
+      futureTransactions.forEach(t => {
+        const amount = toArs(t.amount, t.currency);
+        if (t.type === TransactionType.INCOME) worth -= amount;
+        if (t.type === TransactionType.EXPENSE) worth += amount;
+      });
+      return { name: label, worth };
     }).reverse();
-  }, [netWorthArs]);
+  }, [transactions, accounts, usdRate]);
 
   // Datos para el gráfico de torta (Gastos por Categoría)
   const categoryData = useMemo(() => {
@@ -70,13 +79,22 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
     })
     .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
 
-  const budgetProgress = budgets.map(b => {
-    const spent = transactions
-      .filter(t => t.category === b.category && t.type === TransactionType.EXPENSE)
-      .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
-    const percent = b.limit > 0 ? (spent / b.limit) * 100 : 0;
-    return { ...b, spent, percent };
-  });
+  const budgetProgress = useMemo(() => {
+    const now = new Date();
+    return budgets.map(b => {
+      const spent = transactions
+        .filter(t => {
+          const tDate = new Date(t.date);
+          return t.category === b.category &&
+                 t.type === TransactionType.EXPENSE &&
+                 tDate.getMonth() === now.getMonth() &&
+                 tDate.getFullYear() === now.getFullYear();
+        })
+        .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
+      const percent = b.limit > 0 ? (spent / b.limit) * 100 : 0;
+      return { ...b, spent, percent };
+    });
+  }, [transactions, budgets, usdRate]);
 
   const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6', '#64748b'];
 
@@ -226,7 +244,15 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
   );
 };
 
-const StatCard = ({ icon: Icon, label, amount, color, isSpecial = false }: any) => (
+interface StatCardProps {
+  icon: React.ElementType;
+  label: string;
+  amount: number;
+  color: string;
+  isSpecial?: boolean;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, amount, color, isSpecial = false }) => (
   <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
     <div className={`p-3 bg-${color}-50 text-${color}-500 rounded-2xl w-fit mb-4 group-hover:scale-110 transition-transform`}>
       <Icon size={24} />

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, Plus, X, DollarSign, Save, Network, Database, Target, AlertCircle } from 'lucide-react';
+import { Tags, Plus, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Budget } from '../types';
 
 interface Props {
@@ -24,6 +24,7 @@ const Settings: React.FC<Props> = ({
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
   const [googleWebAppUrl, setGoogleWebAppUrl] = useState('');
   const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('finance_arch_google_webapp_url');
@@ -59,7 +60,8 @@ const Settings: React.FC<Props> = ({
     onUpdateWebhookUrl(localWebhook);
     setBudgets(localBudgets);
     localStorage.setItem('finance_arch_google_webapp_url', googleWebAppUrl.trim());
-    alert("Configuración guardada correctamente.");
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -69,12 +71,14 @@ const Settings: React.FC<Props> = ({
           <h2 className="text-3xl font-bold text-slate-800">Ajustes</h2>
           <p className="text-slate-500 text-sm">Personalización y conectividad del sistema</p>
         </div>
-        <button 
+        <button
           onClick={handleSaveAll}
-          className="bg-slate-900 text-white font-bold py-3 px-8 rounded-2xl hover:bg-black transition-all shadow-xl flex items-center gap-2"
+          className={`font-bold py-3 px-8 rounded-2xl transition-all shadow-xl flex items-center gap-2 ${
+            saved ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-black'
+          }`}
         >
-          <Save size={20} />
-          Guardar Todo
+          {saved ? <CheckCircle2 size={20} /> : <Save size={20} />}
+          {saved ? 'Guardado' : 'Guardar Todo'}
         </button>
       </header>
 
@@ -170,7 +174,13 @@ const Settings: React.FC<Props> = ({
   );
 };
 
-const SectionHeader = ({ icon: Icon, title, color }: any) => (
+interface SectionHeaderProps {
+  icon: React.ElementType;
+  title: string;
+  color: string;
+}
+
+const SectionHeader: React.FC<SectionHeaderProps> = ({ icon: Icon, title, color }) => (
   <div className="flex items-center gap-3">
     <div className={`p-2 bg-${color}-50 text-${color}-600 rounded-xl`}>
       <Icon size={20} />
@@ -179,7 +189,13 @@ const SectionHeader = ({ icon: Icon, title, color }: any) => (
   </div>
 );
 
-const RateField = ({ label, value, onChange }: any) => (
+interface RateFieldProps {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}
+
+const RateField: React.FC<RateFieldProps> = ({ label, value, onChange }) => (
   <div>
     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</label>
     <div className="relative">

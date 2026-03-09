@@ -163,5 +163,15 @@ export const sheetService = {
   async saveBudgets(budgets: Budget[]): Promise<boolean> {
     const res = await runAction('saveBudgets', budgets);
     return !!res;
+  },
+
+  async deleteTransaction(id: string): Promise<boolean> {
+    const res = await runAction('deleteTransaction', { id });
+    return !!res;
+  },
+
+  async deleteAccount(id: string): Promise<boolean> {
+    const res = await runAction('deleteAccount', { id });
+    return !!res;
   }
 };

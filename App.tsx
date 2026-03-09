@@ -139,6 +139,55 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSettleSharedExpenses = async () => {
+    const pendingShared = transactions.filter(t => t.isShared && !t.isSettled);
+    if (pendingShared.length === 0) return;
+
+    // Optimistic update: marcar todo como saldado en la UI
+    const settled = pendingShared.map(t => ({ ...t, isSettled: true }));
+    setTransactions(prev => prev.map(t => settled.find(s => s.id === t.id) || t));
+    setIsSyncing(true);
+
+    try {
+      await Promise.all(settled.map(t => sheetService.saveTransaction(t)));
+      showSuccessToast();
+    } catch (e) {
+      console.error("Error saldando gastos compartidos:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    const t = transactions.find(tx => tx.id === id);
+    if (!t) return;
+
+    // Optimistic update: revertir saldo y eliminar de la UI
+    updateBalanceLocal(t, true);
+    setTransactions(prev => prev.filter(tx => tx.id !== id));
+    setIsSyncing(true);
+
+    try {
+      await sheetService.deleteTransaction(id);
+    } catch (e) {
+      console.error("Error eliminando transacción:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteAccount = async (id: string) => {
+    setAccounts(prev => prev.filter(a => a.id !== id));
+    setIsSyncing(true);
+    try {
+      await sheetService.deleteAccount(id);
+    } catch (e) {
+      console.error("Error eliminando cuenta:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateBudgets = async (newBudgets: Budget[]) => {
     setBudgets(newBudgets);
     setIsSyncing(true);
@@ -245,9 +294,9 @@ const App: React.FC = () => {
         <main className="flex-1 p-6 md:p-12 overflow-y-auto no-scrollbar pb-32">
           <div className="max-w-6xl mx-auto">
             {view === 'dashboard' && <Dashboard transactions={transactions} accounts={accounts} budgets={budgets} usdRate={usdRates.official} blueRate={usdRates.blue} />}
-            {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} />}
-            {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} />}
-            {view === 'shared' && <SharedExpenses transactions={transactions} usdRate={usdRates.official} onSettle={init} />}
+            {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} onDelete={handleDeleteTransaction} />}
+            {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} onDeleteAccount={handleDeleteAccount} />}
+            {view === 'shared' && <SharedExpenses transactions={transactions} usdRate={usdRates.official} onSettle={handleSettleSharedExpenses} />}
             {view === 'settings' && (
               <Settings 
                 categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)} 

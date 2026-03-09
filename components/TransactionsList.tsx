@@ -1,14 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, TransactionType, formatCurrency, Currency } from '../types';
-import { Search, Filter, Edit3, X, Download, FileSpreadsheet } from 'lucide-react';
+import { Search, Filter, Edit3, X, Download, FileSpreadsheet, Trash2 } from 'lucide-react';
 
 interface Props {
   transactions: Transaction[];
   onEdit: (t: Transaction) => void;
+  onDelete: (id: string) => void;
   categories: string[];
 }
 
-const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories }) => {
+const TransactionsList: React.FC<Props> = ({ transactions, onEdit, onDelete, categories }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -153,11 +154,24 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, categories })
                       {t.type === TransactionType.EXPENSE ? '-' : t.type === TransactionType.INCOME ? '+' : ''}${formatCurrency(t.amount, t.currency)}
                     </td>
                     <td className="px-6 py-5 text-right">
-                      {!t.isSettled && (
-                        <button onClick={() => onEdit(t)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors">
-                          <Edit3 size={16} />
+                      <div className="flex items-center justify-end gap-1">
+                        {!t.isSettled && (
+                          <button onClick={() => onEdit(t)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors" title="Editar">
+                            <Edit3 size={16} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`¿Eliminar "${t.concept}"?`)) {
+                              onDelete(t.id);
+                            }
+                          }}
+                          className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={16} />
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}

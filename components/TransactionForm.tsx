@@ -57,7 +57,7 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
 
     onSubmit({
       ...formData,
-      id: editData?.id || Math.random().toString(36).substr(2, 9),
+      id: editData?.id || crypto.randomUUID(),
     } as Transaction);
     onClose();
   };
