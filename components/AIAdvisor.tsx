@@ -53,7 +53,7 @@ const AIAdvisor: React.FC<Props> = ({ transactions, budgets, accounts, webhookUr
   };
 
   return (
-    <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-220px)] animate-in fade-in duration-500">
+    <div className="max-w-4xl mx-auto flex flex-col h-[calc(100svh-250px)] md:h-[calc(100vh-200px)] animate-in fade-in duration-500">
       <header className="flex items-center justify-between mb-4 shrink-0 px-2">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg">

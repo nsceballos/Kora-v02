@@ -57,14 +57,21 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, onDelete, cat
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-800">Movimientos</h2>
-          <p className="text-slate-500">Historial completo ({filteredTransactions.length} registros)</p>
+      <header className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <p className="text-slate-500 text-sm">Historial completo ({filteredTransactions.length} registros)</p>
+          <button
+            onClick={exportToCSV}
+            className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 font-bold text-xs"
+            title="Exportar a CSV"
+          >
+            <FileSpreadsheet size={16} />
+            <span className="hidden sm:inline">Exportar</span>
+          </button>
         </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px]">
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[150px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               type="text" 
@@ -79,18 +86,9 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, onDelete, cat
               </button>
             )}
           </div>
-          
-          <button 
-            onClick={exportToCSV}
-            className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 font-bold text-xs"
-            title="Exportar a CSV"
-          >
-            <FileSpreadsheet size={18} />
-            <span className="hidden sm:inline">Exportar</span>
-          </button>
 
-          <select 
-            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm cursor-pointer"
+          <select
+            className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm cursor-pointer"
             value={filterCategory}
             onChange={e => setFilterCategory(e.target.value)}
           >
@@ -98,8 +96,8 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, onDelete, cat
             {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
-          <select 
-            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm cursor-pointer"
+          <select
+            className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm cursor-pointer"
             value={filterType}
             onChange={e => setFilterType(e.target.value)}
           >
@@ -120,44 +118,45 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, onDelete, cat
             <table className="w-full text-left">
               <thead>
                 <tr className="text-[10px] uppercase tracking-widest text-slate-400 font-bold border-b border-slate-50 bg-slate-50/30">
-                  <th className="px-6 py-5">Fecha</th>
-                  <th className="px-6 py-5">Concepto</th>
-                  <th className="px-6 py-5">Categoría</th>
-                  <th className="px-6 py-5 text-right">Monto</th>
-                  <th className="px-6 py-5"></th>
+                  <th className="px-3 sm:px-6 py-4 sm:py-5">Fecha</th>
+                  <th className="px-3 sm:px-6 py-4 sm:py-5">Concepto</th>
+                  <th className="px-6 py-5 hidden sm:table-cell">Categoría</th>
+                  <th className="px-3 sm:px-6 py-4 sm:py-5 text-right">Monto</th>
+                  <th className="px-2 sm:px-6 py-4 sm:py-5"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filteredTransactions.map(t => (
-                  <tr key={t.id} className={`group hover:bg-slate-50/50 transition-colors ${t.isSettled ? 'opacity-50' : ''}`}>
-                    <td className="px-6 py-5 text-sm text-slate-500">
+                  <tr key={t.id} className={`hover:bg-slate-50/50 transition-colors ${t.isSettled ? 'opacity-50' : ''}`}>
+                    <td className="px-3 sm:px-6 py-3 sm:py-5 text-xs sm:text-sm text-slate-500 whitespace-nowrap">
                       {new Date(t.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-3 sm:px-6 py-3 sm:py-5">
                       <div className="flex flex-col">
-                        <span className="font-semibold text-slate-700">{t.concept}</span>
-                        <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-700 text-sm">{t.concept}</span>
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] text-slate-400 font-bold uppercase">{t.sourceAccount}</span>
-                          {!t.synced && <span className="text-[8px] bg-amber-50 text-amber-500 px-1 rounded">Pendiente Sync</span>}
+                          <span className="text-[10px] text-slate-500 sm:hidden">{t.category}</span>
+                          {!t.synced && <span className="text-[8px] bg-amber-50 text-amber-500 px-1 rounded">Sync pendiente</span>}
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-6 py-5 hidden sm:table-cell">
                       <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold">
                         {t.category}
                       </span>
                     </td>
-                    <td className={`px-6 py-5 text-right font-bold ${
-                      t.type === TransactionType.EXPENSE ? 'text-rose-500' : 
+                    <td className={`px-3 sm:px-6 py-3 sm:py-5 text-right font-bold text-sm whitespace-nowrap ${
+                      t.type === TransactionType.EXPENSE ? 'text-rose-500' :
                       t.type === TransactionType.INCOME ? 'text-emerald-500' : 'text-slate-500'
                     }`}>
                       {t.type === TransactionType.EXPENSE ? '-' : t.type === TransactionType.INCOME ? '+' : ''}${formatCurrency(t.amount, t.currency)}
                     </td>
-                    <td className="px-6 py-5 text-right">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="px-2 sm:px-6 py-3 sm:py-5 text-right">
+                      <div className="flex items-center justify-end gap-0.5">
                         {!t.isSettled && (
-                          <button onClick={() => onEdit(t)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors" title="Editar">
-                            <Edit3 size={16} />
+                          <button onClick={() => onEdit(t)} className="p-1.5 text-slate-300 hover:text-indigo-600 transition-colors" title="Editar">
+                            <Edit3 size={15} />
                           </button>
                         )}
                         <button
@@ -166,10 +165,10 @@ const TransactionsList: React.FC<Props> = ({ transactions, onEdit, onDelete, cat
                               onDelete(t.id);
                             }
                           }}
-                          className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                          className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors"
                           title="Eliminar"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>

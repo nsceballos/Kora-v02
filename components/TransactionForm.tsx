@@ -67,16 +67,16 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
   const isInternalMovement = formData.type === TransactionType.TRANSFER || formData.type === TransactionType.INVESTMENT;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
-        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-600 text-white">
-          <h2 className="text-xl font-bold">{editData ? 'Editar Registro' : 'Nuevo Registro'}</h2>
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 z-[100] animate-in fade-in duration-200">
+      <div className="bg-white w-full max-w-xl sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
+        <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-600 text-white">
+          <h2 className="text-lg sm:text-xl font-bold">{editData ? 'Editar Registro' : 'Nuevo Registro'}</h2>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-8 space-y-6 max-h-[80vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-5 sm:p-8 space-y-4 sm:space-y-6 max-h-[85svh] sm:max-h-[80vh] overflow-y-auto">
           {error && (
             <div className="bg-rose-50 text-rose-600 p-4 rounded-xl flex items-center gap-3 text-sm font-bold border border-rose-100 animate-in shake duration-300">
               <AlertCircle size={18} />
@@ -84,15 +84,15 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
             </div>
           )}
 
-          <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+          <div className="flex bg-slate-100 p-1 rounded-xl">
             {Object.values(TransactionType).map(type => (
               <button
                 key={type}
                 type="button"
                 onClick={() => setFormData({ ...formData, type })}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                  formData.type === type 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
+                className={`flex-1 py-2 text-[10px] sm:text-xs font-bold rounded-lg transition-all leading-tight ${
+                  formData.type === type
+                    ? 'bg-white text-indigo-600 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >

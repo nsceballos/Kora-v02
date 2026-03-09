@@ -65,7 +65,7 @@ const Settings: React.FC<Props> = ({
   };
 
   return (
-    <div className="space-y-12 animate-in fade-in duration-500 pb-20">
+    <div className="space-y-6 md:space-y-10 animate-in fade-in duration-500 pb-20">
       <header className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-bold text-slate-800">Ajustes</h2>
@@ -82,7 +82,7 @@ const Settings: React.FC<Props> = ({
         </button>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10">
         <section className="space-y-6">
           <SectionHeader icon={Database} title="Google Sheets" color="emerald" />
           <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">

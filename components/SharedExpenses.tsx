@@ -42,18 +42,18 @@ const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle }) =>
         <p className="text-slate-500">Liquidación 50/50 de gastos pendientes</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-indigo-400 mb-2">Yo pagué</p>
-          <p className="text-2xl font-bold text-slate-800">${formatCurrency(paidByMe)}</p>
+      <div className="grid grid-cols-3 gap-3 md:gap-6">
+        <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
+          <p className="text-[9px] md:text-[10px] font-black uppercase text-indigo-400 mb-1 md:mb-2">Yo pagué</p>
+          <p className="text-base md:text-2xl font-bold text-slate-800">${formatCurrency(paidByMe)}</p>
         </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-rose-400 mb-2">Pareja pagó</p>
-          <p className="text-2xl font-bold text-slate-800">${formatCurrency(paidByPartner)}</p>
+        <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
+          <p className="text-[9px] md:text-[10px] font-black uppercase text-rose-400 mb-1 md:mb-2">Pareja pagó</p>
+          <p className="text-base md:text-2xl font-bold text-slate-800">${formatCurrency(paidByPartner)}</p>
         </div>
-        <div className="kora-gradient p-6 rounded-2xl shadow-xl text-white">
-          <p className="text-[10px] font-black uppercase opacity-60 mb-2">Total Pendiente</p>
-          <p className="text-2xl font-bold">${formatCurrency(totalShared)}</p>
+        <div className="kora-gradient p-4 md:p-6 rounded-2xl shadow-xl text-white">
+          <p className="text-[9px] md:text-[10px] font-black uppercase opacity-60 mb-1 md:mb-2">Total</p>
+          <p className="text-base md:text-2xl font-bold">${formatCurrency(totalShared)}</p>
         </div>
       </div>
 
@@ -98,18 +98,18 @@ const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle }) =>
               ) : (
                 pendingTransactions.map(t => (
                   <tr key={t.id} className="text-sm">
-                    <td className="px-6 py-4">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <div className="font-bold text-slate-700">{t.concept}</div>
                       <div className="text-[10px] text-slate-400 uppercase font-bold">{t.date}</div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
                         t.paidBy === 'Yo' ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'
                       }`}>
                         Pagó {t.paidBy}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right font-bold text-slate-800">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right font-bold text-slate-800 whitespace-nowrap">
                       ${formatCurrency(t.amount, t.currency)}
                     </td>
                   </tr>
