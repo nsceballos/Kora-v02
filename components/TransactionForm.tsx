@@ -8,9 +8,11 @@ interface Props {
   accounts: Account[];
   categories: string[];
   editData?: Transaction;
+  currentUserName: string;
+  partnerName: string;
 }
 
-const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categories, editData }) => {
+const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categories, editData, currentUserName, partnerName }) => {
   const [formData, setFormData] = useState<Partial<Transaction>>({
     date: new Date().toISOString().split('T')[0],
     concept: '',
@@ -22,7 +24,7 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
     destinationAccount: '',
     type: TransactionType.EXPENSE,
     isShared: false,
-    paidBy: 'Yo'
+    paidBy: currentUserName,
   });
 
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +59,7 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
 
     onSubmit({
       ...formData,
-      id: editData?.id || Math.random().toString(36).substr(2, 9),
+      id: editData?.id || crypto.randomUUID(),
     } as Transaction);
     onClose();
   };
@@ -67,16 +69,16 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
   const isInternalMovement = formData.type === TransactionType.TRANSFER || formData.type === TransactionType.INVESTMENT;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
-        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-600 text-white">
-          <h2 className="text-xl font-bold">{editData ? 'Editar Registro' : 'Nuevo Registro'}</h2>
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 z-[100] animate-in fade-in duration-200">
+      <div className="bg-white w-full max-w-xl sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
+        <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-600 text-white">
+          <h2 className="text-lg sm:text-xl font-bold">{editData ? 'Editar Registro' : 'Nuevo Registro'}</h2>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-8 space-y-6 max-h-[80vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-5 sm:p-8 space-y-4 sm:space-y-6 max-h-[85svh] sm:max-h-[80vh] overflow-y-auto">
           {error && (
             <div className="bg-rose-50 text-rose-600 p-4 rounded-xl flex items-center gap-3 text-sm font-bold border border-rose-100 animate-in shake duration-300">
               <AlertCircle size={18} />
@@ -84,15 +86,15 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
             </div>
           )}
 
-          <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+          <div className="flex bg-slate-100 p-1 rounded-xl">
             {Object.values(TransactionType).map(type => (
               <button
                 key={type}
                 type="button"
                 onClick={() => setFormData({ ...formData, type })}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                  formData.type === type 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
+                className={`flex-1 py-2 text-[10px] sm:text-xs font-bold rounded-lg transition-all leading-tight ${
+                  formData.type === type
+                    ? 'bg-white text-indigo-600 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -201,17 +203,43 @@ const TransactionForm: React.FC<Props> = ({ onClose, onSubmit, accounts, categor
           </div>
 
           {!isInternalMovement && (
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-              <div className="flex flex-col">
-                <span className="text-sm font-semibold text-slate-700">Gasto Compartido</span>
-                <span className="text-xs text-slate-500">Dividir 50/50</span>
+            <div className="space-y-3">
+              {/* Toggle gasto compartido */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold text-slate-700">Gasto Compartido</span>
+                  <span className="text-xs text-slate-500">Dividir 50/50 con {partnerName}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 accent-indigo-600 rounded"
+                  checked={formData.isShared}
+                  onChange={e => setFormData({ ...formData, isShared: e.target.checked, paidBy: e.target.checked ? currentUserName : currentUserName })}
+                />
               </div>
-              <input
-                type="checkbox"
-                className="w-5 h-5 accent-indigo-600 rounded"
-                checked={formData.isShared}
-                onChange={e => setFormData({ ...formData, isShared: e.target.checked })}
-              />
+
+              {/* Selector de quién pagó (solo visible si es gasto compartido) */}
+              {formData.isShared && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">¿Quién pagó?</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, paidBy: currentUserName })}
+                      className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${formData.paidBy === currentUserName ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'}`}
+                    >
+                      {currentUserName} (yo)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, paidBy: partnerName })}
+                      className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${formData.paidBy === partnerName ? 'bg-rose-500 text-white shadow-sm' : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'}`}
+                    >
+                      {partnerName}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

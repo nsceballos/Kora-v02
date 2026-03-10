@@ -19,20 +19,29 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
   const netWorthArs = accounts.reduce((sum, acc) => sum + toArs(acc.balance, acc.currency), 0);
   const netWorthUsd = netWorthArs / usdRate;
 
-  // Cálculo de evolución temporal (simulada hacia atrás desde saldo actual)
+  // Cálculo de evolución temporal real: parte del patrimonio actual y revierte
+  // las transacciones futuras para reconstruir el saldo mes a mes.
   const historyData = useMemo(() => {
-    // En una app real, esto calcularía el saldo histórico real día a día.
-    // Para la demo, generamos una tendencia visual basada en el patrimonio actual.
+    const currentNetWorth = accounts.reduce((sum, acc) => sum + toArs(acc.balance, acc.currency), 0);
     const months = 6;
     return Array.from({ length: months }).map((_, i) => {
       const d = new Date();
+      d.setDate(1);
       d.setMonth(d.getMonth() - i);
       const label = d.toLocaleDateString('es-ES', { month: 'short' });
-      // Variación simulada para el gráfico
-      const variation = Math.sin(i) * (netWorthArs * 0.05); 
-      return { name: label, worth: netWorthArs - (i * (netWorthArs * 0.02)) + variation };
+      const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+
+      // Revertir transacciones posteriores al fin de ese mes para reconstruir el saldo
+      const futureTransactions = transactions.filter(t => new Date(t.date) > endOfMonth);
+      let worth = currentNetWorth;
+      futureTransactions.forEach(t => {
+        const amount = toArs(t.amount, t.currency);
+        if (t.type === TransactionType.INCOME) worth -= amount;
+        if (t.type === TransactionType.EXPENSE) worth += amount;
+      });
+      return { name: label, worth };
     }).reverse();
-  }, [netWorthArs]);
+  }, [transactions, accounts, usdRate]);
 
   // Datos para el gráfico de torta (Gastos por Categoría)
   const categoryData = useMemo(() => {
@@ -70,22 +79,31 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
     })
     .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
 
-  const budgetProgress = budgets.map(b => {
-    const spent = transactions
-      .filter(t => t.category === b.category && t.type === TransactionType.EXPENSE)
-      .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
-    const percent = b.limit > 0 ? (spent / b.limit) * 100 : 0;
-    return { ...b, spent, percent };
-  });
+  const budgetProgress = useMemo(() => {
+    const now = new Date();
+    return budgets.map(b => {
+      const spent = transactions
+        .filter(t => {
+          const tDate = new Date(t.date);
+          return t.category === b.category &&
+                 t.type === TransactionType.EXPENSE &&
+                 tDate.getMonth() === now.getMonth() &&
+                 tDate.getFullYear() === now.getFullYear();
+        })
+        .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
+      const percent = b.limit > 0 ? (spent / b.limit) * 100 : 0;
+      return { ...b, spent, percent };
+    });
+  }, [transactions, budgets, usdRate]);
 
   const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6', '#64748b'];
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tight mb-1">Resumen Financiero</h2>
-          <div className="flex items-center gap-2">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-1">Resumen Financiero</h2>
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Global Consolidado</span>
             {blueRate && (
               <span className="px-2 py-0.5 bg-cyan-50 text-[10px] font-bold text-cyan-600 rounded-full border border-cyan-100">
@@ -94,36 +112,36 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
             )}
           </div>
         </div>
-        <div className="relative group p-8 kora-bg-deep rounded-[2.5rem] text-white shadow-2xl shadow-slate-200 min-w-[320px] overflow-hidden transition-all hover:scale-[1.02]">
+        <div className="relative group p-5 md:p-8 kora-bg-deep rounded-[2rem] md:rounded-[2.5rem] text-white shadow-2xl shadow-slate-200 w-full sm:w-auto sm:min-w-[280px] md:min-w-[320px] overflow-hidden transition-all hover:scale-[1.01]">
           <div className="absolute top-0 right-0 p-4 opacity-10">
-            <TrendingUp size={120} />
+            <TrendingUp size={100} />
           </div>
           <div className="relative z-10">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50 mb-3 text-cyan-400">Patrimonio Neto</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50 mb-2 text-cyan-400">Patrimonio Neto</p>
             <div className="flex items-baseline gap-1">
-              <span className="text-xl font-bold opacity-70">$</span>
-              <h3 className="text-4xl font-black tracking-tighter">{formatCurrency(netWorthArs, Currency.ARS).split(' ')[0]}</h3>
+              <span className="text-lg font-bold opacity-70">$</span>
+              <h3 className="text-3xl md:text-4xl font-black tracking-tighter">{formatCurrency(netWorthArs, Currency.ARS).split(' ')[0]}</h3>
             </div>
-            <div className="flex items-center gap-2 mt-4 text-white font-bold text-sm bg-white/10 w-fit px-3 py-1 rounded-full border border-white/5 backdrop-blur-md">
-              <DollarSign size={14} className="text-cyan-400" /> 
+            <div className="flex items-center gap-2 mt-3 text-white font-bold text-sm bg-white/10 w-fit px-3 py-1 rounded-full border border-white/5 backdrop-blur-md">
+              <DollarSign size={13} className="text-cyan-400" />
               {formatCurrency(netWorthUsd, Currency.USD)}
             </div>
           </div>
         </div>
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
         <StatCard icon={ArrowUpCircle} label="Ingresos (Mes)" amount={monthlyIncomeArs} color="emerald" />
         <StatCard icon={ArrowDownCircle} label="Gastos (Mes)" amount={monthlyExpensesArs} color="rose" />
         <StatCard icon={TrendingUp} label="Balance (Mes)" amount={monthlyIncomeArs - monthlyExpensesArs} color="cyan" />
         <StatCard icon={Users} label="Social" amount={0} color="indigo" isSpecial />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
         {/* Gráfico de Área (Evolución) - Ocupa 2 columnas */}
-        <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter mb-8">Evolución del Patrimonio</h3>
-          <div className="h-64">
+        <div className="lg:col-span-2 bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <h3 className="text-sm md:text-lg font-black text-slate-800 uppercase tracking-tighter mb-5 md:mb-8">Evolución del Patrimonio</h3>
+          <div className="h-52 md:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={historyData}>
                 <defs>
@@ -145,9 +163,9 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
         </div>
 
         {/* Gráfico Circular (Gastos por Categoría) - Ocupa 1 columna */}
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
+        <div className="bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
           <div className="flex justify-between items-center mb-4">
-             <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Consumo</h3>
+             <h3 className="text-sm md:text-lg font-black text-slate-800 uppercase tracking-tighter">Consumo</h3>
              <PieChartIcon size={20} className="text-slate-300" />
           </div>
           <div className="flex-1 min-h-[250px] relative">
@@ -189,9 +207,9 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
       </div>
 
       {/* Control de Presupuestos - Ancho completo */}
-      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="flex justify-between items-center mb-8">
-          <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Control de Presupuestos</h3>
+      <div className="bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex justify-between items-center mb-5 md:mb-8">
+          <h3 className="text-sm md:text-lg font-black text-slate-800 uppercase tracking-tighter">Control de Presupuestos</h3>
           <span className="text-[10px] font-bold text-slate-400 uppercase">Mensual</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
@@ -226,16 +244,35 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
   );
 };
 
-const StatCard = ({ icon: Icon, label, amount, color, isSpecial = false }: any) => (
-  <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-    <div className={`p-3 bg-${color}-50 text-${color}-500 rounded-2xl w-fit mb-4 group-hover:scale-110 transition-transform`}>
-      <Icon size={24} />
+const STAT_CARD_COLORS: Record<string, { bg: string; text: string }> = {
+  emerald: { bg: 'bg-emerald-50', text: 'text-emerald-500' },
+  rose:    { bg: 'bg-rose-50',    text: 'text-rose-500'    },
+  cyan:    { bg: 'bg-cyan-50',    text: 'text-cyan-500'    },
+  indigo:  { bg: 'bg-indigo-50',  text: 'text-indigo-500'  },
+  amber:   { bg: 'bg-amber-50',   text: 'text-amber-500'   },
+};
+
+interface StatCardProps {
+  icon: React.ElementType;
+  label: string;
+  amount: number;
+  color: string;
+  isSpecial?: boolean;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, amount, color, isSpecial = false }) => {
+  const c = STAT_CARD_COLORS[color] ?? STAT_CARD_COLORS.indigo;
+  return (
+  <div className="bg-white p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+    <div className={`p-2 md:p-3 ${c.bg} ${c.text} rounded-xl md:rounded-2xl w-fit mb-3 md:mb-4 group-hover:scale-110 transition-transform`}>
+      <Icon size={20} />
     </div>
-    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{label}</p>
-    <p className={`text-xl font-bold text-slate-800`}>
+    <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 leading-tight">{label}</p>
+    <p className="text-base md:text-xl font-bold text-slate-800">
       {isSpecial ? 'A Mano' : `$${formatCurrency(amount).split(' ')[0]}`}
     </p>
   </div>
-);
+  );
+};
 
 export default Dashboard;

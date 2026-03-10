@@ -1,4 +1,4 @@
-import { Transaction, Account, AppData, Budget } from '../types';
+import { Transaction, Account, AppData, Budget, UserConfig, DEFAULT_USERS } from '../types';
 
 declare const google: any;
 
@@ -27,7 +27,7 @@ const addToQueue = (action: string, data: any) => {
   localStorage.setItem('kora_sync_queue', JSON.stringify(queue));
 };
 
-async function runAction(action: string, data?: any, retries = 1): Promise<any> {
+async function runAction(action: string, data?: any, retries = 2): Promise<any> {
   // 1. Entorno nativo GAS (si se ejecutara dentro de Sheets/Sidebar)
   if (isGasEnv()) {
     return new Promise((resolve, reject) => {
@@ -35,59 +35,56 @@ async function runAction(action: string, data?: any, retries = 1): Promise<any> 
         .withSuccessHandler((res: any) => resolve(res))
         .withFailureHandler((err: any) => reject(err))[action](data);
     });
-  } 
-  
+  }
+
   // 2. Validación de URL
   const url = getWebAppUrl();
   if (!url || !url.startsWith('http')) {
     console.warn("Kora: No hay URL configurada o es inválida.");
-    // Si no es una lectura de datos, lo encolamos para cuando el usuario ponga la URL
     if (action !== 'getAppData') {
       addToQueue(action, data);
-      return { success: true, offline: true }; // Simulamos éxito
+      return { success: true, offline: true };
     }
     return null;
   }
 
-  // 3. Intento de Fetch
+  // 3. Intento de Fetch con backoff exponencial
   for (let i = 0; i <= retries; i++) {
     try {
       const response = await fetch(url, {
         method: 'POST',
-        redirect: 'follow', 
+        redirect: 'follow',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, data })
       });
 
       if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-      
+
       const text = await response.text();
       try {
         const result = JSON.parse(text);
         if (result.error) throw new Error(result.error);
         return result;
       } catch (jsonError) {
-        // Si el servidor devuelve 200 OK pero no es JSON (común en GAS con redirects), asumimos éxito.
+        // GAS a veces devuelve 200 OK sin JSON válido (redirects), asumimos éxito.
         console.warn('Respuesta no-JSON recibida (asumiendo éxito por status 200):', text.substring(0, 50));
         return { success: true, warning: 'non-json-response' };
       }
 
     } catch (e) {
-      console.warn(`Intento ${i + 1} fallido para ${action}:`, e);
-      
-      // Si fallan todos los intentos
+      console.warn(`Intento ${i + 1}/${retries + 1} fallido para ${action}:`, e);
+
       if (i === retries) {
-        // Si NO es pedir datos (es guardar), lo guardamos en cola y devolvemos éxito falso al UI
-        // para que la UI optimista no se preocupe.
         if (action !== 'getAppData') {
           console.log(`Guardando ${action} en cola offline.`);
           addToQueue(action, data);
           return { success: true, queued: true };
         }
-        return null; // Si era getAppData, fallamos real.
+        return null;
       }
-      
-      await new Promise(r => setTimeout(r, 1000)); // Esperar 1s antes de reintentar
+
+      // Backoff exponencial: 1s, 2s, 4s
+      await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
     }
   }
   return null;
@@ -96,14 +93,18 @@ async function runAction(action: string, data?: any, retries = 1): Promise<any> 
 export const sheetService = {
   async getAppData(): Promise<AppData> {
     const fallback: AppData = { transactions: [], accounts: [], categories: [], budgets: [] };
-    
+
     try {
       const result = await runAction('getAppData');
-      if (result && (result.transactions || result.accounts)) {
-        const data = {
-          transactions: Array.isArray(result.transactions) ? result.transactions : [],
-          accounts: Array.isArray(result.accounts) ? result.accounts : [],
-          categories: Array.isArray(result.categories) ? result.categories : [],
+      if (result && Array.isArray(result.transactions) && Array.isArray(result.accounts)) {
+        const data: AppData = {
+          transactions: result.transactions.filter((t: any) =>
+            t && typeof t.id === 'string' && typeof t.amount === 'number' && t.type
+          ),
+          accounts: result.accounts.filter((a: any) =>
+            a && typeof a.id === 'string' && typeof a.balance === 'number'
+          ),
+          categories: Array.isArray(result.categories) ? result.categories.filter(Boolean) : [],
           budgets: Array.isArray(result.budgets) ? result.budgets : []
         };
         // Cachear datos exitosos
@@ -114,35 +115,36 @@ export const sheetService = {
       console.error("Error cargando de la nube, usando caché:", e);
     }
 
-    const stored = localStorage.getItem('finance_arch_data');
-    return stored ? JSON.parse(stored) : fallback;
+    try {
+      const stored = localStorage.getItem('finance_arch_data');
+      if (stored) return JSON.parse(stored) as AppData;
+    } catch {
+      console.warn("Caché local corrupta, usando estado vacío.");
+    }
+    return fallback;
   },
 
   async flushQueue() {
     const queue = getQueue();
     if (queue.length === 0) return;
-    
+
     console.log(`Sincronizando ${queue.length} acciones pendientes...`);
-    
+
     // Procesamos la cola secuencialmente para mantener orden
-    const newQueue = [];
+    const newQueue: any[] = [];
     for (const item of queue) {
       try {
-        const result = await runAction(item.action, item.data, 0); // 0 reintentos para no bloquear
-        // Si runAction devuelve null (fallo total) lo mantenemos. Si devuelve objeto (éxito o queued), lo sacamos.
-        // Pero espera, si devuelve queued=true es que falló de nuevo.
+        // 1 reintento con backoff para el flush
+        const result = await runAction(item.action, item.data, 1);
         if (!result || result.queued) {
-           newQueue.push(item);
+          newQueue.push(item);
         }
       } catch {
         newQueue.push(item);
       }
     }
-    
-    // Actualizar cola con los que fallaron de nuevo
-    if (newQueue.length !== queue.length) {
-      localStorage.setItem('kora_sync_queue', JSON.stringify(newQueue));
-    }
+
+    localStorage.setItem('kora_sync_queue', JSON.stringify(newQueue));
   },
 
   async saveTransaction(t: Transaction): Promise<boolean> {
@@ -163,5 +165,57 @@ export const sheetService = {
   async saveBudgets(budgets: Budget[]): Promise<boolean> {
     const res = await runAction('saveBudgets', budgets);
     return !!res;
-  }
+  },
+
+  async deleteTransaction(id: string): Promise<boolean> {
+    const res = await runAction('deleteTransaction', { id });
+    return !!res;
+  },
+
+  async deleteAccount(id: string): Promise<boolean> {
+    const res = await runAction('deleteAccount', { id });
+    return !!res;
+  },
+
+  async getUsers(): Promise<UserConfig[]> {
+    const VALID_COLORS = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
+    try {
+      const result = await runAction('getUsers');
+      if (Array.isArray(result) && result.length > 0) {
+        const users: UserConfig[] = result
+          .filter((u: any) => u && typeof u.id === 'string' && typeof u.name === 'string' && u.name)
+          .map((u: any): UserConfig => ({
+            id: String(u.id),
+            name: String(u.name),
+            color: (VALID_COLORS.includes(u.color) ? u.color : 'indigo') as UserConfig['color'],
+            pin: String(u.pin || ''),
+          }));
+        if (users.length > 0) {
+          localStorage.setItem('kora_users_config', JSON.stringify(users));
+          return users;
+        }
+      }
+    } catch (e) {
+      console.error("Error cargando usuarios de Sheets:", e);
+    }
+    // Fallback: localStorage → DEFAULT_USERS
+    try {
+      const stored = localStorage.getItem('kora_users_config');
+      if (stored) {
+        const parsed: UserConfig[] = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_USERS;
+  },
+
+  async saveUser(user: UserConfig): Promise<boolean> {
+    const res = await runAction('saveUser', user);
+    return !!res;
+  },
+
+  async deleteUser(id: string): Promise<boolean> {
+    const res = await runAction('deleteUser', { id });
+    return !!res;
+  },
 };

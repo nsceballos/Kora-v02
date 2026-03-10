@@ -7,7 +7,8 @@ const SHEETS = {
   TRANSACTIONS: 'Transacciones',
   ACCOUNTS: 'Cuentas',
   CATEGORIES: 'Categorias',
-  BUDGETS: 'Presupuestos'
+  BUDGETS: 'Presupuestos',
+  USERS: 'Usuarios'
 };
 
 /**
@@ -59,6 +60,11 @@ function doPost(e) {
       case 'saveAccount': result = saveAccount(data); break;
       case 'saveCategories': result = saveCategories(data); break;
       case 'saveBudgets': result = saveBudgets(data); break;
+      case 'deleteTransaction': result = deleteRow(SHEETS.TRANSACTIONS, data.id); break;
+      case 'deleteAccount': result = deleteRow(SHEETS.ACCOUNTS, data.id); break;
+      case 'getUsers': result = getUsers(); break;
+      case 'saveUser': result = saveUser(data); break;
+      case 'deleteUser': result = deleteRow(SHEETS.USERS, data.id); break;
       default: result = { error: "Action '" + action + "' not recognized" };
     }
   } catch (err) {
@@ -83,6 +89,7 @@ function setupDatabase() {
   initSheet(SHEETS.TRANSACTIONS, ['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado']);
   initSheet(SHEETS.ACCOUNTS, ['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
   initSheet(SHEETS.BUDGETS, ['Categoria', 'Limite']);
+  initSheet(SHEETS.USERS, ['ID', 'Nombre', 'Color', 'PIN']);
 }
 
 function initSheet(name, headers) {
@@ -113,7 +120,7 @@ function saveTransaction(t) {
   const vals = [
     t.id, t.date, t.concept, t.amount, t.currency, 
     t.category || 'Varios', t.sourceAccount, t.destinationAccount || '', 
-    t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo', t.isSettled ? 'SI' : 'NO'
+    t.type, t.isShared ? 'SI' : 'NO', t.paidBy || '', t.isSettled ? 'SI' : 'NO'
   ];
 
   if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
@@ -157,6 +164,33 @@ function saveBudgets(budgets) {
   return { success: true };
 }
 
+function getUsers() {
+  setupDatabase();
+  return getSheetData(SHEETS.USERS).map(function(u) {
+    return {
+      id: String(u.id || ''),
+      name: String(u.name || ''),
+      color: u.color || 'indigo',
+      pin: String(u.pin || '')
+    };
+  }).filter(function(u) { return u.id && u.name; });
+}
+
+function saveUser(user) {
+  setupDatabase();
+  if (!user || !user.id || !user.name) return { error: 'Usuario inválido' };
+  const sheet = SS.getSheetByName(SHEETS.USERS);
+  const data = sheet.getDataRange().getValues();
+  let rowIdx = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(user.id)) { rowIdx = i + 1; break; }
+  }
+  const vals = [user.id, user.name, user.color || 'indigo', user.pin || ''];
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  else sheet.appendRow(vals);
+  return { success: true, id: user.id };
+}
+
 function getSheetData(sheetName) {
   const sheet = SS.getSheetByName(sheetName);
   const data = sheet.getDataRange().getValues();
@@ -175,12 +209,24 @@ function getSheetData(sheetName) {
 }
 
 function toCamelCase(str) {
-  const map = { 
-    'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount', 
-    'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount', 
-    'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared', 
-    'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name', 
+  const map = {
+    'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount',
+    'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount',
+    'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared',
+    'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name',
     'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit'
   };
   return map[str] || str.toLowerCase().replace(/\s/g, '');
+}
+
+function deleteRow(sheetName, id) {
+  const sheet = SS.getSheetByName(sheetName);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      return { success: true };
+    }
+  }
+  return { success: false, error: 'Row not found' };
 }

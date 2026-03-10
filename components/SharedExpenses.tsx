@@ -6,9 +6,11 @@ interface Props {
   transactions: Transaction[];
   usdRate: number;
   onSettle: () => void;
+  currentUserName: string;
+  partnerName: string;
 }
 
-const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle }) => {
+const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle, currentUserName, partnerName }) => {
   const toArs = (amount: number, currency: Currency) => {
     return currency === Currency.USD ? amount * usdRate : amount;
   };
@@ -16,23 +18,23 @@ const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle }) =>
   // Solo consideramos gastos compartidos que NO han sido saldados
   const pendingTransactions = transactions.filter(t => t.isShared && !t.isSettled);
   const settledTransactions = transactions.filter(t => t.isShared && t.isSettled);
-  
+
   const paidByMe = pendingTransactions
-    .filter(t => t.paidBy === 'Yo')
+    .filter(t => t.paidBy === currentUserName)
     .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
 
   const paidByPartner = pendingTransactions
-    .filter(t => t.paidBy === 'Pareja')
+    .filter(t => t.paidBy === partnerName)
     .reduce((sum, t) => sum + toArs(t.amount, t.currency), 0);
 
   const totalShared = paidByMe + paidByPartner;
   const eachShouldPay = totalShared / 2;
 
   const balance = paidByMe - eachShouldPay;
-  const whoOwesWho = balance > 0 
-    ? { debtor: 'Pareja', creditor: 'Yo', amount: balance }
+  const whoOwesWho = balance > 0
+    ? { debtor: partnerName, creditor: currentUserName, amount: balance }
     : balance < 0
-    ? { debtor: 'Yo', creditor: 'Pareja', amount: Math.abs(balance) }
+    ? { debtor: currentUserName, creditor: partnerName, amount: Math.abs(balance) }
     : null;
 
   return (
@@ -42,18 +44,18 @@ const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle }) =>
         <p className="text-slate-500">Liquidación 50/50 de gastos pendientes</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-indigo-400 mb-2">Yo pagué</p>
-          <p className="text-2xl font-bold text-slate-800">${formatCurrency(paidByMe)}</p>
+      <div className="grid grid-cols-3 gap-3 md:gap-6">
+        <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
+          <p className="text-[9px] md:text-[10px] font-black uppercase text-indigo-400 mb-1 md:mb-2 truncate">{currentUserName} pagó</p>
+          <p className="text-base md:text-2xl font-bold text-slate-800">${formatCurrency(paidByMe)}</p>
         </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-rose-400 mb-2">Pareja pagó</p>
-          <p className="text-2xl font-bold text-slate-800">${formatCurrency(paidByPartner)}</p>
+        <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
+          <p className="text-[9px] md:text-[10px] font-black uppercase text-rose-400 mb-1 md:mb-2 truncate">{partnerName} pagó</p>
+          <p className="text-base md:text-2xl font-bold text-slate-800">${formatCurrency(paidByPartner)}</p>
         </div>
-        <div className="kora-gradient p-6 rounded-2xl shadow-xl text-white">
-          <p className="text-[10px] font-black uppercase opacity-60 mb-2">Total Pendiente</p>
-          <p className="text-2xl font-bold">${formatCurrency(totalShared)}</p>
+        <div className="kora-gradient p-4 md:p-6 rounded-2xl shadow-xl text-white">
+          <p className="text-[9px] md:text-[10px] font-black uppercase opacity-60 mb-1 md:mb-2">Total</p>
+          <p className="text-base md:text-2xl font-bold">${formatCurrency(totalShared)}</p>
         </div>
       </div>
 
@@ -98,18 +100,18 @@ const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle }) =>
               ) : (
                 pendingTransactions.map(t => (
                   <tr key={t.id} className="text-sm">
-                    <td className="px-6 py-4">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <div className="font-bold text-slate-700">{t.concept}</div>
                       <div className="text-[10px] text-slate-400 uppercase font-bold">{t.date}</div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                        t.paidBy === 'Yo' ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'
+                        t.paidBy === currentUserName ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'
                       }`}>
                         Pagó {t.paidBy}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right font-bold text-slate-800">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right font-bold text-slate-800 whitespace-nowrap">
                       ${formatCurrency(t.amount, t.currency)}
                     </td>
                   </tr>

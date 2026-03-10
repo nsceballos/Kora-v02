@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  LayoutDashboard, 
-  Receipt, 
-  Wallet, 
-  Users, 
-  BrainCircuit, 
+import {
+  LayoutDashboard,
+  Receipt,
+  Wallet,
+  Users,
+  BrainCircuit,
   PlusCircle,
   Settings as SettingsIcon,
   RefreshCw,
   CheckCircle2,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  LogOut,
 } from 'lucide-react';
-import { Transaction, TransactionType, Account, Currency, Budget } from './types';
+import { Transaction, TransactionType, Account, Currency, Budget, UserConfig, DEFAULT_USERS } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionsList from './components/TransactionsList';
 import AccountsManager from './components/AccountsManager';
@@ -21,11 +22,23 @@ import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
 import { sheetService } from './services/sheetService';
+import LoginScreen from './components/LoginScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
+const USER_AVATAR_COLORS: Record<string, string> = {
+  indigo:  'bg-indigo-500',
+  rose:    'bg-rose-500',
+  emerald: 'bg-emerald-500',
+  amber:   'bg-amber-500',
+  cyan:    'bg-cyan-500',
+  purple:  'bg-purple-500',
+};
+
+type AppView = 'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings';
+
 const App: React.FC = () => {
-  const [view, setView] = useState<'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings'>('dashboard');
+  const [view, setView] = useState<AppView>('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
@@ -33,6 +46,74 @@ const App: React.FC = () => {
   const [usdRates, setUsdRates] = useState({ blue: 1240, official: 980 });
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('');
   
+  // ── Auth ──────────────────────────────────────────────────
+  const [users, setUsers] = useState<UserConfig[]>(DEFAULT_USERS);
+  const [currentUser, setCurrentUser] = useState<UserConfig | null>(null);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+
+  // Bootstrap: cargar usuarios desde Sheets (con fallback a localStorage/DEFAULT_USERS)
+  useEffect(() => {
+    const bootstrap = async () => {
+      const loadedUsers = await sheetService.getUsers();
+      setUsers(loadedUsers);
+      // Si hay sesión guardada, refrescarla con los datos más recientes de Sheets
+      try {
+        const session = sessionStorage.getItem('kora_session');
+        if (session) {
+          const sessionUser: UserConfig = JSON.parse(session);
+          const refreshed = loadedUsers.find(u => u.id === sessionUser.id);
+          setCurrentUser(refreshed ?? sessionUser);
+        }
+      } catch {}
+      setIsLoadingUsers(false);
+    };
+    bootstrap();
+  }, []);
+
+  const handleLogin = (user: UserConfig) => {
+    sessionStorage.setItem('kora_session', JSON.stringify(user));
+    setCurrentUser(user);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('kora_session');
+    setCurrentUser(null);
+    setTransactions([]);
+    setAccounts([]);
+    setIsLoading(true);
+  };
+
+  const handleUpdateUsers = (updated: UserConfig[]) => {
+    // Detectar cambios de nombre para migrar transacciones existentes
+    const renames: Record<string, string> = {};
+    updated.forEach(u => {
+      const old = users.find(o => o.id === u.id);
+      if (old && old.name !== u.name) renames[old.name] = u.name;
+    });
+    if (Object.keys(renames).length > 0) {
+      setTransactions(prev => prev.map(t =>
+        renames[t.paidBy] ? { ...t, paidBy: renames[t.paidBy] } : t
+      ));
+    }
+
+    // Sincronizar a Sheets: guardar nuevos/modificados y eliminar los borrados
+    const deletedUsers = users.filter(u => !updated.find(u2 => u2.id === u.id));
+    deletedUsers.forEach(u => sheetService.deleteUser(u.id).catch(console.error));
+    updated.forEach(u => sheetService.saveUser(u).catch(console.error));
+
+    setUsers(updated);
+    localStorage.setItem('kora_users_config', JSON.stringify(updated));
+    // Si el usuario actual cambió de nombre/color/pin, actualizar la sesión
+    if (currentUser) {
+      const me = updated.find(u => u.id === currentUser.id);
+      if (me) {
+        setCurrentUser(me);
+        sessionStorage.setItem('kora_session', JSON.stringify(me));
+      }
+    }
+  };
+  // ──────────────────────────────────────────────────────────
+
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,7 +157,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { init(); }, [init]);
+  useEffect(() => { if (currentUser) init(); }, [currentUser, init]);
 
   const showSuccessToast = () => {
     setShowToast(true);
@@ -139,6 +220,55 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSettleSharedExpenses = async () => {
+    const pendingShared = transactions.filter(t => t.isShared && !t.isSettled);
+    if (pendingShared.length === 0) return;
+
+    // Optimistic update: marcar todo como saldado en la UI
+    const settled = pendingShared.map(t => ({ ...t, isSettled: true }));
+    setTransactions(prev => prev.map(t => settled.find(s => s.id === t.id) || t));
+    setIsSyncing(true);
+
+    try {
+      await Promise.all(settled.map(t => sheetService.saveTransaction(t)));
+      showSuccessToast();
+    } catch (e) {
+      console.error("Error saldando gastos compartidos:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    const t = transactions.find(tx => tx.id === id);
+    if (!t) return;
+
+    // Optimistic update: revertir saldo y eliminar de la UI
+    updateBalanceLocal(t, true);
+    setTransactions(prev => prev.filter(tx => tx.id !== id));
+    setIsSyncing(true);
+
+    try {
+      await sheetService.deleteTransaction(id);
+    } catch (e) {
+      console.error("Error eliminando transacción:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteAccount = async (id: string) => {
+    setAccounts(prev => prev.filter(a => a.id !== id));
+    setIsSyncing(true);
+    try {
+      await sheetService.deleteAccount(id);
+    } catch (e) {
+      console.error("Error eliminando cuenta:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateBudgets = async (newBudgets: Budget[]) => {
     setBudgets(newBudgets);
     setIsSyncing(true);
@@ -166,14 +296,32 @@ const App: React.FC = () => {
     }));
   };
 
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'transactions', label: 'Historial', icon: Receipt },
-    { id: 'accounts', label: 'Cuentas', icon: Wallet },
-    { id: 'shared', label: 'Gastos Pareja', icon: Users },
-    { id: 'settings', label: 'Ajustes', icon: SettingsIcon },
-    { id: 'ai', label: 'Kora AI', icon: BrainCircuit }
+  const navItems: { id: AppView; label: string; shortLabel: string; icon: typeof LayoutDashboard }[] = [
+    { id: 'dashboard',    label: 'Dashboard',     shortLabel: 'Inicio',    icon: LayoutDashboard },
+    { id: 'transactions', label: 'Historial',     shortLabel: 'Historial', icon: Receipt },
+    { id: 'accounts',    label: 'Cuentas',        shortLabel: 'Cuentas',   icon: Wallet },
+    { id: 'shared',      label: 'Gastos Pareja',  shortLabel: 'Pareja',    icon: Users },
+    { id: 'settings',    label: 'Ajustes',        shortLabel: 'Ajustes',   icon: SettingsIcon },
+    { id: 'ai',          label: 'Kora AI',        shortLabel: 'IA',        icon: BrainCircuit }
   ];
+
+  // Pantalla de carga mientras se obtienen los usuarios de Sheets
+  if (isLoadingUsers) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 gap-4">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-11 h-11 kora-gradient rounded-2xl flex items-center justify-center font-black text-white text-lg">K</div>
+          <h1 className="text-3xl font-black text-white tracking-tighter">Kora</h1>
+        </div>
+        <Loader2 className="animate-spin text-cyan-400" size={36} />
+        <p className="text-slate-500 font-black uppercase tracking-[0.2em] text-[10px]">Conectando...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginScreen users={users} onLogin={handleLogin} />;
+  }
 
   if (isLoading) {
     return (
@@ -187,39 +335,39 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#f8fafc]">
       {/* Desktop Sidebar */}
-      <nav className="hidden md:flex flex-col w-72 bg-slate-900 text-white p-8 shrink-0">
-        <div className="flex items-center gap-4 mb-12">
-          <div className="w-10 h-10 kora-gradient rounded-xl flex items-center justify-center font-black">K</div>
-          <h1 className="text-2xl font-black tracking-tighter">Kora</h1>
+      <nav className="hidden md:flex flex-col w-60 lg:w-72 bg-slate-900 text-white p-6 lg:p-8 shrink-0">
+        <div className="flex items-center gap-3 mb-10">
+          <div className="w-9 h-9 kora-gradient rounded-xl flex items-center justify-center font-black text-sm">K</div>
+          <h1 className="text-xl lg:text-2xl font-black tracking-tighter">Kora</h1>
         </div>
-        
-        <div className="space-y-2 flex-1">
+
+        <div className="space-y-1 flex-1">
           {navItems.map(item => (
             <button
               key={item.id}
-              onClick={() => setView(item.id as any)}
-              className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all ${
+              onClick={() => setView(item.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all ${
                 view === item.id ? 'bg-white/10 text-cyan-400 shadow-inner' : 'text-slate-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              <item.icon size={20} />
+              <item.icon size={18} />
               <span className="font-bold text-sm">{item.label}</span>
             </button>
           ))}
         </div>
 
-        <button 
+        <button
           onClick={() => setIsFormOpen(true)}
-          className="w-full kora-gradient text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-xl hover:scale-[1.02] transition-transform active:scale-95"
+          className="w-full kora-gradient text-white font-bold py-3 lg:py-4 rounded-2xl flex items-center justify-center gap-2 shadow-xl hover:scale-[1.02] transition-transform active:scale-95 text-sm"
         >
-          <PlusCircle size={20} /> NUEVO REGISTRO
+          <PlusCircle size={18} /> NUEVO REGISTRO
         </button>
       </nav>
 
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="flex items-center justify-between px-6 md:px-12 py-6 bg-white border-b border-slate-100 shrink-0">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-black text-slate-800 hidden md:block">
+        <header className="flex items-center justify-between px-4 md:px-8 lg:px-12 py-4 md:py-5 bg-white border-b border-slate-100 shrink-0">
+          <div className="flex items-center gap-3">
+            <h1 className="text-base md:text-xl font-black text-slate-800">
               {navItems.find(n => n.id === view)?.label}
             </h1>
             {isSyncing && (
@@ -235,25 +383,49 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3">
-             <div className="p-2 bg-slate-50 rounded-full text-slate-400 hover:bg-slate-100 transition-colors">
-               <RefreshCw size={18} onClick={init} className={`cursor-pointer ${isSyncing ? 'animate-spin' : ''}`} />
-             </div>
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-slate-50 rounded-full text-slate-400 hover:bg-slate-100 transition-colors cursor-pointer" onClick={init}>
+              <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+            </div>
+            {/* Avatar + nombre del usuario activo */}
+            <div className="flex items-center gap-2 pl-1">
+              <div className={`w-7 h-7 rounded-lg ${USER_AVATAR_COLORS[currentUser.color] ?? 'bg-indigo-500'} flex items-center justify-center text-white text-xs font-black`}>
+                {currentUser.name[0]?.toUpperCase()}
+              </div>
+              <span className="text-sm font-bold text-slate-600 hidden sm:block">{currentUser.name}</span>
+              <button
+                onClick={handleLogout}
+                title="Cerrar sesión"
+                className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
           </div>
         </header>
 
-        <main className="flex-1 p-6 md:p-12 overflow-y-auto no-scrollbar pb-32">
+        <main className="flex-1 p-4 md:p-8 lg:p-12 overflow-y-auto no-scrollbar pb-28 md:pb-8">
           <div className="max-w-6xl mx-auto">
             {view === 'dashboard' && <Dashboard transactions={transactions} accounts={accounts} budgets={budgets} usdRate={usdRates.official} blueRate={usdRates.blue} />}
-            {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} />}
-            {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} />}
-            {view === 'shared' && <SharedExpenses transactions={transactions} usdRate={usdRates.official} onSettle={init} />}
+            {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} onDelete={handleDeleteTransaction} />}
+            {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} onDeleteAccount={handleDeleteAccount} />}
+            {view === 'shared' && (
+              <SharedExpenses
+                transactions={transactions}
+                usdRate={usdRates.official}
+                onSettle={handleSettleSharedExpenses}
+                currentUserName={currentUser.name}
+                partnerName={users.find(u => u.id !== currentUser.id)?.name ?? 'Pareja'}
+              />
+            )}
             {view === 'settings' && (
-              <Settings 
-                categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)} 
+              <Settings
+                categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)}
                 budgets={budgets} setBudgets={handleUpdateBudgets}
-                usdRates={usdRates} onUpdateRates={setUsdRates} 
-                n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl} 
+                usdRates={usdRates} onUpdateRates={setUsdRates}
+                n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl}
+                users={users} onUpdateUsers={handleUpdateUsers}
+                currentUserId={currentUser.id}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}
@@ -261,15 +433,38 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {/* Mobile Nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 flex justify-around p-4 pb-8 z-50">
-        {navItems.slice(0, 4).map(item => (
-          <button key={item.id} onClick={() => setView(item.id as any)} className={`flex flex-col items-center gap-1 ${view === item.id ? 'text-indigo-600' : 'text-slate-400'}`}>
-            <item.icon size={20} />
-            <span className="text-[9px] font-bold uppercase">{item.label}</span>
+      {/* Mobile Nav — 3 items | FAB | 3 items */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 z-50">
+        <div className="flex justify-around items-end px-1 pt-2" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
+          {navItems.slice(0, 3).map(item => (
+            <button
+              key={item.id}
+              onClick={() => setView(item.id)}
+              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 min-w-0 ${view === item.id ? 'text-indigo-600' : 'text-slate-400'}`}
+            >
+              <item.icon size={19} />
+              <span className="text-[7px] font-bold uppercase tracking-tight leading-none">{item.shortLabel}</span>
+            </button>
+          ))}
+
+          <button
+            onClick={() => setIsFormOpen(true)}
+            className="flex-shrink-0 bg-indigo-600 text-white p-3 rounded-2xl -mt-7 shadow-2xl border-[3px] border-white active:scale-90 transition-transform"
+          >
+            <PlusCircle size={22} />
           </button>
-        ))}
-        <button onClick={() => setIsFormOpen(true)} className="bg-indigo-600 text-white p-4 rounded-3xl -mt-12 shadow-2xl border-4 border-white active:scale-90 transition-transform"><PlusCircle size={24} /></button>
+
+          {navItems.slice(3, 6).map(item => (
+            <button
+              key={item.id}
+              onClick={() => setView(item.id)}
+              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 min-w-0 ${view === item.id ? 'text-indigo-600' : 'text-slate-400'}`}
+            >
+              <item.icon size={19} />
+              <span className="text-[7px] font-bold uppercase tracking-tight leading-none">{item.shortLabel}</span>
+            </button>
+          ))}
+        </div>
       </nav>
 
       {showToast && (
@@ -280,7 +475,15 @@ const App: React.FC = () => {
       )}
 
       {(isFormOpen || editingTransaction) && (
-        <TransactionForm onClose={() => { setIsFormOpen(false); setEditingTransaction(null); }} onSubmit={saveTransaction} accounts={accounts} categories={categories} editData={editingTransaction || undefined} />
+        <TransactionForm
+          onClose={() => { setIsFormOpen(false); setEditingTransaction(null); }}
+          onSubmit={saveTransaction}
+          accounts={accounts}
+          categories={categories}
+          editData={editingTransaction || undefined}
+          currentUserName={currentUser.name}
+          partnerName={users.find(u => u.id !== currentUser.id)?.name ?? 'Pareja'}
+        />
       )}
     </div>
   );
