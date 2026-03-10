@@ -115,7 +115,7 @@ function saveTransaction(t) {
   const vals = [
     t.id, t.date, t.concept, t.amount, t.currency, 
     t.category || 'Varios', t.sourceAccount, t.destinationAccount || '', 
-    t.type, t.isShared ? 'SI' : 'NO', t.paidBy || 'Yo', t.isSettled ? 'SI' : 'NO'
+    t.type, t.isShared ? 'SI' : 'NO', t.paidBy || '', t.isSettled ? 'SI' : 'NO'
   ];
 
   if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);

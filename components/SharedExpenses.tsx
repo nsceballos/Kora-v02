@@ -106,7 +106,7 @@ const SharedExpenses: React.FC<Props> = ({ transactions, usdRate, onSettle, curr
                     </td>
                     <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                        t.paidBy === 'Yo' ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'
+                        t.paidBy === currentUserName ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'
                       }`}>
                         Pagó {t.paidBy}
                       </span>

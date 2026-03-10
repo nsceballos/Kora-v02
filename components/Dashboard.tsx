@@ -244,6 +244,14 @@ const Dashboard: React.FC<Props> = ({ transactions, accounts, budgets, usdRate, 
   );
 };
 
+const STAT_CARD_COLORS: Record<string, { bg: string; text: string }> = {
+  emerald: { bg: 'bg-emerald-50', text: 'text-emerald-500' },
+  rose:    { bg: 'bg-rose-50',    text: 'text-rose-500'    },
+  cyan:    { bg: 'bg-cyan-50',    text: 'text-cyan-500'    },
+  indigo:  { bg: 'bg-indigo-50',  text: 'text-indigo-500'  },
+  amber:   { bg: 'bg-amber-50',   text: 'text-amber-500'   },
+};
+
 interface StatCardProps {
   icon: React.ElementType;
   label: string;
@@ -252,9 +260,11 @@ interface StatCardProps {
   isSpecial?: boolean;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, amount, color, isSpecial = false }) => (
+const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, amount, color, isSpecial = false }) => {
+  const c = STAT_CARD_COLORS[color] ?? STAT_CARD_COLORS.indigo;
+  return (
   <div className="bg-white p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-    <div className={`p-2 md:p-3 bg-${color}-50 text-${color}-500 rounded-xl md:rounded-2xl w-fit mb-3 md:mb-4 group-hover:scale-110 transition-transform`}>
+    <div className={`p-2 md:p-3 ${c.bg} ${c.text} rounded-xl md:rounded-2xl w-fit mb-3 md:mb-4 group-hover:scale-110 transition-transform`}>
       <Icon size={20} />
     </div>
     <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 leading-tight">{label}</p>
@@ -262,6 +272,7 @@ const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, amount, color, i
       {isSpecial ? 'A Mano' : `$${formatCurrency(amount).split(' ')[0]}`}
     </p>
   </div>
-);
+  );
+};
 
 export default Dashboard;

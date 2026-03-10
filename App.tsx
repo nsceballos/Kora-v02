@@ -26,6 +26,15 @@ import LoginScreen from './components/LoginScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
+const USER_AVATAR_COLORS: Record<string, string> = {
+  indigo:  'bg-indigo-500',
+  rose:    'bg-rose-500',
+  emerald: 'bg-emerald-500',
+  amber:   'bg-amber-500',
+  cyan:    'bg-cyan-500',
+  purple:  'bg-purple-500',
+};
+
 type AppView = 'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings';
 
 const App: React.FC = () => {
@@ -68,6 +77,19 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUsers = (updated: UserConfig[]) => {
+    // Detectar cambios de nombre para migrar transacciones existentes
+    const renames: Record<string, string> = {};
+    updated.forEach(u => {
+      const old = users.find(o => o.id === u.id);
+      if (old && old.name !== u.name) renames[old.name] = u.name;
+    });
+
+    if (Object.keys(renames).length > 0) {
+      setTransactions(prev => prev.map(t =>
+        renames[t.paidBy] ? { ...t, paidBy: renames[t.paidBy] } : t
+      ));
+    }
+
     setUsers(updated);
     localStorage.setItem('kora_users_config', JSON.stringify(updated));
     // Si el usuario actual cambió de nombre, actualizar la sesión
@@ -342,7 +364,7 @@ const App: React.FC = () => {
             </div>
             {/* Avatar + nombre del usuario activo */}
             <div className="flex items-center gap-2 pl-1">
-              <div className={`w-7 h-7 rounded-lg bg-${currentUser.color}-500 flex items-center justify-center text-white text-xs font-black`}>
+              <div className={`w-7 h-7 rounded-lg ${USER_AVATAR_COLORS[currentUser.color] ?? 'bg-indigo-500'} flex items-center justify-center text-white text-xs font-black`}>
                 {currentUser.name[0]?.toUpperCase()}
               </div>
               <span className="text-sm font-bold text-slate-600 hidden sm:block">{currentUser.name}</span>
