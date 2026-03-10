@@ -49,18 +49,25 @@ const App: React.FC = () => {
   // ── Auth ──────────────────────────────────────────────────
   const [users, setUsers] = useState<UserConfig[]>(DEFAULT_USERS);
   const [currentUser, setCurrentUser] = useState<UserConfig | null>(null);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
 
+  // Bootstrap: cargar usuarios desde Sheets (con fallback a localStorage/DEFAULT_USERS)
   useEffect(() => {
-    // Cargar config de usuarios
-    try {
-      const saved = localStorage.getItem('kora_users_config');
-      if (saved) setUsers(JSON.parse(saved));
-    } catch {}
-    // Restaurar sesión activa
-    try {
-      const session = sessionStorage.getItem('kora_session');
-      if (session) setCurrentUser(JSON.parse(session));
-    } catch {}
+    const bootstrap = async () => {
+      const loadedUsers = await sheetService.getUsers();
+      setUsers(loadedUsers);
+      // Si hay sesión guardada, refrescarla con los datos más recientes de Sheets
+      try {
+        const session = sessionStorage.getItem('kora_session');
+        if (session) {
+          const sessionUser: UserConfig = JSON.parse(session);
+          const refreshed = loadedUsers.find(u => u.id === sessionUser.id);
+          setCurrentUser(refreshed ?? sessionUser);
+        }
+      } catch {}
+      setIsLoadingUsers(false);
+    };
+    bootstrap();
   }, []);
 
   const handleLogin = (user: UserConfig) => {
@@ -83,16 +90,20 @@ const App: React.FC = () => {
       const old = users.find(o => o.id === u.id);
       if (old && old.name !== u.name) renames[old.name] = u.name;
     });
-
     if (Object.keys(renames).length > 0) {
       setTransactions(prev => prev.map(t =>
         renames[t.paidBy] ? { ...t, paidBy: renames[t.paidBy] } : t
       ));
     }
 
+    // Sincronizar a Sheets: guardar nuevos/modificados y eliminar los borrados
+    const deletedUsers = users.filter(u => !updated.find(u2 => u2.id === u.id));
+    deletedUsers.forEach(u => sheetService.deleteUser(u.id).catch(console.error));
+    updated.forEach(u => sheetService.saveUser(u).catch(console.error));
+
     setUsers(updated);
     localStorage.setItem('kora_users_config', JSON.stringify(updated));
-    // Si el usuario actual cambió de nombre, actualizar la sesión
+    // Si el usuario actual cambió de nombre/color/pin, actualizar la sesión
     if (currentUser) {
       const me = updated.find(u => u.id === currentUser.id);
       if (me) {
@@ -294,6 +305,20 @@ const App: React.FC = () => {
     { id: 'ai',          label: 'Kora AI',        shortLabel: 'IA',        icon: BrainCircuit }
   ];
 
+  // Pantalla de carga mientras se obtienen los usuarios de Sheets
+  if (isLoadingUsers) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 gap-4">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-11 h-11 kora-gradient rounded-2xl flex items-center justify-center font-black text-white text-lg">K</div>
+          <h1 className="text-3xl font-black text-white tracking-tighter">Kora</h1>
+        </div>
+        <Loader2 className="animate-spin text-cyan-400" size={36} />
+        <p className="text-slate-500 font-black uppercase tracking-[0.2em] text-[10px]">Conectando...</p>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return <LoginScreen users={users} onLogin={handleLogin} />;
   }
@@ -400,6 +425,7 @@ const App: React.FC = () => {
                 usdRates={usdRates} onUpdateRates={setUsdRates}
                 n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl}
                 users={users} onUpdateUsers={handleUpdateUsers}
+                currentUserId={currentUser.id}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}

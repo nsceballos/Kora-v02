@@ -7,7 +7,8 @@ const SHEETS = {
   TRANSACTIONS: 'Transacciones',
   ACCOUNTS: 'Cuentas',
   CATEGORIES: 'Categorias',
-  BUDGETS: 'Presupuestos'
+  BUDGETS: 'Presupuestos',
+  USERS: 'Usuarios'
 };
 
 /**
@@ -61,6 +62,9 @@ function doPost(e) {
       case 'saveBudgets': result = saveBudgets(data); break;
       case 'deleteTransaction': result = deleteRow(SHEETS.TRANSACTIONS, data.id); break;
       case 'deleteAccount': result = deleteRow(SHEETS.ACCOUNTS, data.id); break;
+      case 'getUsers': result = getUsers(); break;
+      case 'saveUser': result = saveUser(data); break;
+      case 'deleteUser': result = deleteRow(SHEETS.USERS, data.id); break;
       default: result = { error: "Action '" + action + "' not recognized" };
     }
   } catch (err) {
@@ -85,6 +89,7 @@ function setupDatabase() {
   initSheet(SHEETS.TRANSACTIONS, ['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado']);
   initSheet(SHEETS.ACCOUNTS, ['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
   initSheet(SHEETS.BUDGETS, ['Categoria', 'Limite']);
+  initSheet(SHEETS.USERS, ['ID', 'Nombre', 'Color', 'PIN']);
 }
 
 function initSheet(name, headers) {
@@ -157,6 +162,33 @@ function saveBudgets(budgets) {
     budgets.forEach(b => sheet.appendRow([b.category, b.limit]));
   }
   return { success: true };
+}
+
+function getUsers() {
+  setupDatabase();
+  return getSheetData(SHEETS.USERS).map(function(u) {
+    return {
+      id: String(u.id || ''),
+      name: String(u.name || ''),
+      color: u.color || 'indigo',
+      pin: String(u.pin || '')
+    };
+  }).filter(function(u) { return u.id && u.name; });
+}
+
+function saveUser(user) {
+  setupDatabase();
+  if (!user || !user.id || !user.name) return { error: 'Usuario inválido' };
+  const sheet = SS.getSheetByName(SHEETS.USERS);
+  const data = sheet.getDataRange().getValues();
+  let rowIdx = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(user.id)) { rowIdx = i + 1; break; }
+  }
+  const vals = [user.id, user.name, user.color || 'indigo', user.pin || ''];
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  else sheet.appendRow(vals);
+  return { success: true, id: user.id };
 }
 
 function getSheetData(sheetName) {

@@ -1,4 +1,4 @@
-import { Transaction, Account, AppData, Budget } from '../types';
+import { Transaction, Account, AppData, Budget, UserConfig, DEFAULT_USERS } from '../types';
 
 declare const google: any;
 
@@ -175,5 +175,47 @@ export const sheetService = {
   async deleteAccount(id: string): Promise<boolean> {
     const res = await runAction('deleteAccount', { id });
     return !!res;
-  }
+  },
+
+  async getUsers(): Promise<UserConfig[]> {
+    const VALID_COLORS = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
+    try {
+      const result = await runAction('getUsers');
+      if (Array.isArray(result) && result.length > 0) {
+        const users: UserConfig[] = result
+          .filter((u: any) => u && typeof u.id === 'string' && typeof u.name === 'string' && u.name)
+          .map((u: any): UserConfig => ({
+            id: String(u.id),
+            name: String(u.name),
+            color: (VALID_COLORS.includes(u.color) ? u.color : 'indigo') as UserConfig['color'],
+            pin: String(u.pin || ''),
+          }));
+        if (users.length > 0) {
+          localStorage.setItem('kora_users_config', JSON.stringify(users));
+          return users;
+        }
+      }
+    } catch (e) {
+      console.error("Error cargando usuarios de Sheets:", e);
+    }
+    // Fallback: localStorage → DEFAULT_USERS
+    try {
+      const stored = localStorage.getItem('kora_users_config');
+      if (stored) {
+        const parsed: UserConfig[] = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_USERS;
+  },
+
+  async saveUser(user: UserConfig): Promise<boolean> {
+    const res = await runAction('saveUser', user);
+    return !!res;
+  },
+
+  async deleteUser(id: string): Promise<boolean> {
+    const res = await runAction('deleteUser', { id });
+    return !!res;
+  },
 };
