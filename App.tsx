@@ -24,7 +24,6 @@ import Settings from './components/Settings';
 import { sheetService } from './services/sheetService';
 import { googleAuth, GoogleUser } from './services/googleAuth';
 import LoginScreen from './components/LoginScreen';
-import SetupScreen from './components/SetupScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
@@ -38,7 +37,7 @@ const USER_AVATAR_COLORS: Record<string, string> = {
 };
 
 type AppView = 'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings';
-type AppPhase = 'loading' | 'setup' | 'login' | 'app';
+type AppPhase = 'loading' | 'login' | 'app';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('dashboard');
@@ -58,42 +57,36 @@ const App: React.FC = () => {
   // ── Bootstrap: determine initial phase ──────────────────────
   useEffect(() => {
     const bootstrap = async () => {
-      // Step 1: Check if Google API config exists
-      if (!googleAuth.isConfigured()) {
-        setPhase('setup');
-        return;
-      }
-
-      // Step 2: Initialize Google APIs
-      try {
-        await googleAuth.initGapi();
-        googleAuth.initGis();
-      } catch (e) {
-        console.warn('Google API init error:', e);
-      }
-
-      // Step 3: Try to restore Google session
-      const restored = await googleAuth.tryRestoreSession();
-      if (restored) {
-        setGoogleUser(restored);
-        // Register/find user in Sheets and auto-login
+      // Step 1: Initialize Google APIs if configured (env vars)
+      if (googleAuth.isConfigured()) {
         try {
-          const user = await sheetService.registerGoogleUser(restored);
-          setCurrentUser(user);
-          sessionStorage.setItem('kora_session', JSON.stringify(user));
-
-          // Load all users for the app
-          const allUsers = await sheetService.getUsers();
-          setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
-
-          setPhase('app');
-          return;
+          await googleAuth.initGapi();
+          googleAuth.initGis();
         } catch (e) {
-          console.error('Error restoring session:', e);
+          console.warn('Google API init error:', e);
+        }
+
+        // Step 2: Try to restore Google session
+        const restored = await googleAuth.tryRestoreSession();
+        if (restored) {
+          setGoogleUser(restored);
+          try {
+            const user = await sheetService.registerGoogleUser(restored);
+            setCurrentUser(user);
+            sessionStorage.setItem('kora_session', JSON.stringify(user));
+
+            const allUsers = await sheetService.getUsers();
+            setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
+
+            setPhase('app');
+            return;
+          } catch (e) {
+            console.error('Error restoring session:', e);
+          }
         }
       }
 
-      // Step 4: Try to restore legacy session (PIN-based users)
+      // Step 3: Try to restore legacy session (PIN-based users)
       try {
         const session = sessionStorage.getItem('kora_session');
         if (session) {
@@ -108,7 +101,7 @@ const App: React.FC = () => {
         }
       } catch {}
 
-      // Step 5: Load users for login screen
+      // Step 4: Load users for login screen
       try {
         const loadedUsers = await sheetService.getUsers();
         if (loadedUsers.length > 0) setUsers(loadedUsers);
@@ -119,21 +112,6 @@ const App: React.FC = () => {
 
     bootstrap();
   }, []);
-
-  // ── Setup handler ───────────────────────────────────────────
-  const handleSetup = async (config: { clientId: string; spreadsheetId: string }) => {
-    googleAuth.saveConfig(config);
-
-    // Initialize Google APIs with new config
-    try {
-      await googleAuth.initGapi();
-      googleAuth.initGis();
-    } catch (e) {
-      console.warn('Google API init after setup:', e);
-    }
-
-    setPhase('login');
-  };
 
   // ── Google Login handler ────────────────────────────────────
   const handleGoogleLogin = async () => {
@@ -387,16 +365,6 @@ const App: React.FC = () => {
         <Loader2 className="animate-spin text-cyan-400" size={36} />
         <p className="text-slate-500 font-black uppercase tracking-[0.2em] text-[10px]">Conectando...</p>
       </div>
-    );
-  }
-
-  // ── Phase: Setup (first time configuration) ─────────────────
-  if (phase === 'setup') {
-    return (
-      <SetupScreen
-        onSave={handleSetup}
-        initialConfig={googleAuth.getConfig()}
-      />
     );
   }
 

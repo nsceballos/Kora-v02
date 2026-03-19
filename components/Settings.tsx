@@ -123,7 +123,7 @@ const Settings: React.FC<Props> = ({
           <SectionHeader icon={Database} title="Google Sheets" color="emerald" />
           <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Web App URL (Legacy)</label>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Web App URL (Fallback)</label>
               <input
                 type="text"
                 placeholder="https://script.google.com/macros/s/.../exec"
@@ -132,13 +132,7 @@ const Settings: React.FC<Props> = ({
                 onChange={e => setGoogleWebAppUrl(e.target.value)}
               />
               <p className="mt-2 text-[10px] text-slate-400 italic flex items-center gap-1">
-                <AlertCircle size={10} /> Fallback: URL de Apps Script (opcional si usas API directa).
-              </p>
-            </div>
-            <div className="pt-3 border-t border-slate-100">
-              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">API Directa</p>
-              <p className="text-[10px] text-slate-400">
-                La configuración de Google Sheets API (Client ID y Spreadsheet ID) se gestiona desde la pantalla de configuración inicial. Para reconfigurar, borra los datos de la app en localStorage.
+                <AlertCircle size={10} /> URL de Apps Script (opcional, solo como respaldo).
               </p>
             </div>
           </div>

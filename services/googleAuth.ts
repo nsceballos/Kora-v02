@@ -2,6 +2,10 @@
  * Kora - Google OAuth 2.0 Authentication Service
  * Uses Google Identity Services (GIS) for user authentication
  * and Google API Client (gapi) for Sheets API access.
+ *
+ * Configuration is read from environment variables (build time):
+ *   VITE_GOOGLE_CLIENT_ID
+ *   VITE_GOOGLE_SPREADSHEET_ID
  */
 
 declare const google: any;
@@ -17,20 +21,17 @@ export interface GoogleUser {
   accessToken: string;
 }
 
-interface KoraConfig {
-  clientId: string;
-  spreadsheetId: string;
-}
-
-const CONFIG_KEY = 'kora_google_config';
 const SESSION_KEY = 'kora_google_session';
+
+// Read config from Vite env vars (injected at build time)
+const CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+const SPREADSHEET_ID = (import.meta as any).env?.VITE_GOOGLE_SPREADSHEET_ID || '';
 
 let tokenClient: any = null;
 let gapiInited = false;
 let gisInited = false;
 let currentAccessToken: string | null = null;
 
-// Resolve when both gapi and gis are ready
 let resolveReady: (() => void) | null = null;
 const readyPromise = new Promise<void>(r => { resolveReady = r; });
 
@@ -42,22 +43,9 @@ function maybeResolveReady() {
 }
 
 export const googleAuth = {
-  /** Save configuration (Client ID + Spreadsheet ID) */
-  saveConfig(config: KoraConfig) {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-  },
-
-  /** Get saved configuration */
-  getConfig(): KoraConfig | null {
-    try {
-      const raw = localStorage.getItem(CONFIG_KEY);
-      if (!raw) return null;
-      const config = JSON.parse(raw) as KoraConfig;
-      if (config.clientId && config.spreadsheetId) return config;
-      return null;
-    } catch {
-      return null;
-    }
+  /** Get the spreadsheet ID from env config */
+  getSpreadsheetId(): string | null {
+    return SPREADSHEET_ID || null;
   },
 
   /** Get the current access token */
@@ -65,9 +53,9 @@ export const googleAuth = {
     return currentAccessToken;
   },
 
-  /** Get the spreadsheet ID from config */
-  getSpreadsheetId(): string | null {
-    return this.getConfig()?.spreadsheetId || null;
+  /** Check if the env vars are configured */
+  isConfigured(): boolean {
+    return !!(CLIENT_ID && SPREADSHEET_ID);
   },
 
   /** Initialize Google API Client Library */
@@ -89,8 +77,7 @@ export const googleAuth = {
 
   /** Initialize Google Identity Services */
   initGis() {
-    const config = this.getConfig();
-    if (!config?.clientId) return;
+    if (!CLIENT_ID) return;
 
     if (typeof google === 'undefined' || !google.accounts) {
       console.warn('GIS not loaded');
@@ -98,9 +85,9 @@ export const googleAuth = {
     }
 
     tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: config.clientId,
+      client_id: CLIENT_ID,
       scope: SCOPES,
-      callback: () => {}, // Will be set dynamically per request
+      callback: () => {},
     });
     gisInited = true;
     maybeResolveReady();
@@ -108,8 +95,7 @@ export const googleAuth = {
 
   /** Wait until both libs are initialized */
   async waitReady() {
-    const config = this.getConfig();
-    if (!config) throw new Error('NO_CONFIG');
+    if (!this.isConfigured()) throw new Error('NO_CONFIG');
     await readyPromise;
   },
 
@@ -129,12 +115,10 @@ export const googleAuth = {
 
         currentAccessToken = tokenResponse.access_token;
 
-        // Set the token in gapi client
         if (gapiInited) {
           gapi.client.setToken({ access_token: tokenResponse.access_token });
         }
 
-        // Fetch user profile
         try {
           const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
             headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
@@ -149,7 +133,6 @@ export const googleAuth = {
             accessToken: tokenResponse.access_token,
           };
 
-          // Save session
           sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
           resolve(user);
         } catch (e) {
@@ -168,7 +151,6 @@ export const googleAuth = {
       if (!raw) return null;
       const user = JSON.parse(raw) as GoogleUser;
 
-      // Verify the token is still valid
       const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: { Authorization: `Bearer ${user.accessToken}` }
       });
@@ -181,7 +163,6 @@ export const googleAuth = {
         return user;
       }
 
-      // Token expired
       sessionStorage.removeItem(SESSION_KEY);
       return null;
     } catch {
@@ -196,10 +177,5 @@ export const googleAuth = {
     }
     currentAccessToken = null;
     sessionStorage.removeItem(SESSION_KEY);
-  },
-
-  /** Check if configured */
-  isConfigured(): boolean {
-    return this.getConfig() !== null;
   },
 };
