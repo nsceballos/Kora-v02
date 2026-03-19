@@ -89,7 +89,7 @@ function setupDatabase() {
   initSheet(SHEETS.TRANSACTIONS, ['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado']);
   initSheet(SHEETS.ACCOUNTS, ['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
   initSheet(SHEETS.BUDGETS, ['Categoria', 'Limite']);
-  initSheet(SHEETS.USERS, ['ID', 'Nombre', 'Color', 'PIN']);
+  initSheet(SHEETS.USERS, ['ID', 'Nombre', 'Email', 'Avatar', 'Color', 'PIN', 'FechaRegistro']);
 }
 
 function initSheet(name, headers) {
@@ -170,8 +170,11 @@ function getUsers() {
     return {
       id: String(u.id || ''),
       name: String(u.name || ''),
+      email: String(u.email || ''),
+      avatar: String(u.avatar || ''),
       color: u.color || 'indigo',
-      pin: String(u.pin || '')
+      pin: String(u.pin || ''),
+      registeredAt: u.registeredAt || u.fecharegistro || ''
     };
   }).filter(function(u) { return u.id && u.name; });
 }
@@ -185,7 +188,7 @@ function saveUser(user) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]) === String(user.id)) { rowIdx = i + 1; break; }
   }
-  const vals = [user.id, user.name, user.color || 'indigo', user.pin || ''];
+  const vals = [user.id, user.name, user.email || '', user.avatar || '', user.color || 'indigo', user.pin || '', user.registeredAt || new Date().toISOString().split('T')[0]];
   if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
   else sheet.appendRow(vals);
   return { success: true, id: user.id };
@@ -214,7 +217,9 @@ function toCamelCase(str) {
     'Moneda': 'currency', 'Categoria': 'category', 'Cuenta Origen': 'sourceAccount',
     'Cuenta Destino': 'destinationAccount', 'Tipo': 'type', 'Compartido': 'isShared',
     'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name',
-    'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit'
+    'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit',
+    'Email': 'email', 'Avatar': 'avatar', 'Color': 'color', 'PIN': 'pin', 'FechaRegistro': 'registeredAt',
+    'Subcategoria': 'subcategory'
   };
   return map[str] || str.toLowerCase().replace(/\s/g, '');
 }
