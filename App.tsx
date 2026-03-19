@@ -22,7 +22,9 @@ import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
 import { sheetService } from './services/sheetService';
+import { googleAuth, GoogleUser } from './services/googleAuth';
 import LoginScreen from './components/LoginScreen';
+import SetupScreen from './components/SetupScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
@@ -36,6 +38,7 @@ const USER_AVATAR_COLORS: Record<string, string> = {
 };
 
 type AppView = 'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings';
+type AppPhase = 'loading' | 'setup' | 'login' | 'app';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('dashboard');
@@ -45,46 +48,129 @@ const App: React.FC = () => {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [usdRates, setUsdRates] = useState({ blue: 1240, official: 980 });
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('');
-  
-  // ── Auth ──────────────────────────────────────────────────
+
+  // ── App Phase & Auth ────────────────────────────────────────
+  const [phase, setPhase] = useState<AppPhase>('loading');
   const [users, setUsers] = useState<UserConfig[]>(DEFAULT_USERS);
   const [currentUser, setCurrentUser] = useState<UserConfig | null>(null);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
 
-  // Bootstrap: cargar usuarios desde Sheets (con fallback a localStorage/DEFAULT_USERS)
+  // ── Bootstrap: determine initial phase ──────────────────────
   useEffect(() => {
     const bootstrap = async () => {
-      const loadedUsers = await sheetService.getUsers();
-      setUsers(loadedUsers);
-      // Si hay sesión guardada, refrescarla con los datos más recientes de Sheets
+      // Step 1: Check if Google API config exists
+      if (!googleAuth.isConfigured()) {
+        setPhase('setup');
+        return;
+      }
+
+      // Step 2: Initialize Google APIs
+      try {
+        await googleAuth.initGapi();
+        googleAuth.initGis();
+      } catch (e) {
+        console.warn('Google API init error:', e);
+      }
+
+      // Step 3: Try to restore Google session
+      const restored = await googleAuth.tryRestoreSession();
+      if (restored) {
+        setGoogleUser(restored);
+        // Register/find user in Sheets and auto-login
+        try {
+          const user = await sheetService.registerGoogleUser(restored);
+          setCurrentUser(user);
+          sessionStorage.setItem('kora_session', JSON.stringify(user));
+
+          // Load all users for the app
+          const allUsers = await sheetService.getUsers();
+          setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
+
+          setPhase('app');
+          return;
+        } catch (e) {
+          console.error('Error restoring session:', e);
+        }
+      }
+
+      // Step 4: Try to restore legacy session (PIN-based users)
       try {
         const session = sessionStorage.getItem('kora_session');
         if (session) {
           const sessionUser: UserConfig = JSON.parse(session);
-          const refreshed = loadedUsers.find(u => u.id === sessionUser.id);
-          setCurrentUser(refreshed ?? sessionUser);
+          setCurrentUser(sessionUser);
+
+          const allUsers = await sheetService.getUsers();
+          setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
+
+          setPhase('app');
+          return;
         }
       } catch {}
-      setIsLoadingUsers(false);
+
+      // Step 5: Load users for login screen
+      try {
+        const loadedUsers = await sheetService.getUsers();
+        if (loadedUsers.length > 0) setUsers(loadedUsers);
+      } catch {}
+
+      setPhase('login');
     };
+
     bootstrap();
   }, []);
 
+  // ── Setup handler ───────────────────────────────────────────
+  const handleSetup = async (config: { clientId: string; spreadsheetId: string }) => {
+    googleAuth.saveConfig(config);
+
+    // Initialize Google APIs with new config
+    try {
+      await googleAuth.initGapi();
+      googleAuth.initGis();
+    } catch (e) {
+      console.warn('Google API init after setup:', e);
+    }
+
+    setPhase('login');
+  };
+
+  // ── Google Login handler ────────────────────────────────────
+  const handleGoogleLogin = async () => {
+    const gUser = await googleAuth.requestAccessToken();
+    setGoogleUser(gUser);
+
+    // Register/find user in Google Sheets
+    const user = await sheetService.registerGoogleUser(gUser);
+    setCurrentUser(user);
+    sessionStorage.setItem('kora_session', JSON.stringify(user));
+
+    // Load all users
+    const allUsers = await sheetService.getUsers();
+    setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
+
+    setPhase('app');
+  };
+
+  // ── Legacy profile login handler ───────────────────────────
   const handleLogin = (user: UserConfig) => {
     sessionStorage.setItem('kora_session', JSON.stringify(user));
     setCurrentUser(user);
+    setPhase('app');
   };
 
   const handleLogout = () => {
+    googleAuth.logout();
     sessionStorage.removeItem('kora_session');
     setCurrentUser(null);
+    setGoogleUser(null);
     setTransactions([]);
     setAccounts([]);
     setIsLoading(true);
+    setPhase('login');
   };
 
   const handleUpdateUsers = (updated: UserConfig[]) => {
-    // Detectar cambios de nombre para migrar transacciones existentes
     const renames: Record<string, string> = {};
     updated.forEach(u => {
       const old = users.find(o => o.id === u.id);
@@ -96,14 +182,12 @@ const App: React.FC = () => {
       ));
     }
 
-    // Sincronizar a Sheets: guardar nuevos/modificados y eliminar los borrados
     const deletedUsers = users.filter(u => !updated.find(u2 => u2.id === u.id));
     deletedUsers.forEach(u => sheetService.deleteUser(u.id).catch(console.error));
     updated.forEach(u => sheetService.saveUser(u).catch(console.error));
 
     setUsers(updated);
     localStorage.setItem('kora_users_config', JSON.stringify(updated));
-    // Si el usuario actual cambió de nombre/color/pin, actualizar la sesión
     if (currentUser) {
       const me = updated.find(u => u.id === currentUser.id);
       if (me) {
@@ -112,8 +196,8 @@ const App: React.FC = () => {
       }
     }
   };
-  // ──────────────────────────────────────────────────────────
 
+  // ── Data loading ────────────────────────────────────────────
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -125,22 +209,16 @@ const App: React.FC = () => {
     try {
       setIsSyncing(true);
       setSyncError(null);
-      
-      // Intentar sincronizar cola offline primero de forma silenciosa
+
       sheetService.flushQueue().catch(console.error);
-      
+
       const data = await sheetService.getAppData();
-      
-      // Validamos si la respuesta es estructuralmente válida, incluso si está vacía (usuario nuevo)
+
       if (data && Array.isArray(data.transactions) && Array.isArray(data.accounts)) {
         setTransactions(data.transactions);
         setAccounts(data.accounts);
         if (data.categories?.length > 0) setCategories(data.categories);
         if (data.budgets?.length > 0) setBudgets(data.budgets);
-      } else {
-        // Fallback: Si la estructura no es válida, no sobreescribimos el estado local
-        // a menos que sea el primer inicio
-        if (transactions.length === 0) console.warn("Datos remotos inválidos o estructura desconocida.");
       }
 
       const savedRates = localStorage.getItem('finance_arch_rates');
@@ -157,7 +235,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { if (currentUser) init(); }, [currentUser, init]);
+  useEffect(() => { if (phase === 'app' && currentUser) init(); }, [phase, currentUser, init]);
 
   const showSuccessToast = () => {
     setShowToast(true);
@@ -165,48 +243,43 @@ const App: React.FC = () => {
   };
 
   const saveTransaction = async (newT: Transaction) => {
-    // Optimistic Update
     let updatedTransactions = [...transactions];
     if (editingTransaction) {
       updatedTransactions = transactions.filter(t => t.id !== editingTransaction.id);
-      updateBalanceLocal(editingTransaction, true); // Revertir saldo anterior
+      updateBalanceLocal(editingTransaction, true);
     }
-    
+
     const transactionToSave = { ...newT, synced: false };
     updatedTransactions.push(transactionToSave);
-    
-    // Actualizar estado visual inmediatamente
+
     setTransactions(updatedTransactions);
-    updateBalanceLocal(newT, false); // Aplicar nuevo saldo
-    
+    updateBalanceLocal(newT, false);
+
     setIsFormOpen(false);
     setEditingTransaction(null);
     setIsSyncing(true);
 
     try {
-      // Intentar guardar en segundo plano
       await sheetService.saveTransaction(newT);
       setTransactions(prev => prev.map(t => t.id === newT.id ? { ...t, synced: true } : t));
       showSuccessToast();
     } catch (e) {
       console.error("Error guardando transacción:", e);
-      // No revertimos la UI, el servicio ya lo puso en cola (Queue)
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleSaveAccount = async (acc: Account) => {
-    // Optimistic Update: Actualizar UI inmediatamente
     const exists = accounts.find(a => a.id === acc.id);
     let newAccounts;
-    
+
     if (exists) {
       newAccounts = accounts.map(a => a.id === acc.id ? acc : a);
     } else {
       newAccounts = [...accounts, acc];
     }
-    
+
     setAccounts(newAccounts);
     setIsSyncing(true);
 
@@ -224,7 +297,6 @@ const App: React.FC = () => {
     const pendingShared = transactions.filter(t => t.isShared && !t.isSettled);
     if (pendingShared.length === 0) return;
 
-    // Optimistic update: marcar todo como saldado en la UI
     const settled = pendingShared.map(t => ({ ...t, isSettled: true }));
     setTransactions(prev => prev.map(t => settled.find(s => s.id === t.id) || t));
     setIsSyncing(true);
@@ -243,7 +315,6 @@ const App: React.FC = () => {
     const t = transactions.find(tx => tx.id === id);
     if (!t) return;
 
-    // Optimistic update: revertir saldo y eliminar de la UI
     updateBalanceLocal(t, true);
     setTransactions(prev => prev.filter(tx => tx.id !== id));
     setIsSyncing(true);
@@ -305,8 +376,8 @@ const App: React.FC = () => {
     { id: 'ai',          label: 'Kora AI',        shortLabel: 'IA',        icon: BrainCircuit }
   ];
 
-  // Pantalla de carga mientras se obtienen los usuarios de Sheets
-  if (isLoadingUsers) {
+  // ── Phase: Loading ──────────────────────────────────────────
+  if (phase === 'loading') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 gap-4">
         <div className="flex items-center gap-3 mb-6">
@@ -319,10 +390,29 @@ const App: React.FC = () => {
     );
   }
 
-  if (!currentUser) {
-    return <LoginScreen users={users} onLogin={handleLogin} />;
+  // ── Phase: Setup (first time configuration) ─────────────────
+  if (phase === 'setup') {
+    return (
+      <SetupScreen
+        onSave={handleSetup}
+        initialConfig={googleAuth.getConfig()}
+      />
+    );
   }
 
+  // ── Phase: Login ────────────────────────────────────────────
+  if (phase === 'login') {
+    return (
+      <LoginScreen
+        users={users}
+        onLogin={handleLogin}
+        onGoogleLogin={handleGoogleLogin}
+        isGoogleAuthEnabled={googleAuth.isConfigured()}
+      />
+    );
+  }
+
+  // ── Phase: App (loading data) ───────────────────────────────
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900">
@@ -389,10 +479,14 @@ const App: React.FC = () => {
             </div>
             {/* Avatar + nombre del usuario activo */}
             <div className="flex items-center gap-2 pl-1">
-              <div className={`w-7 h-7 rounded-lg ${USER_AVATAR_COLORS[currentUser.color] ?? 'bg-indigo-500'} flex items-center justify-center text-white text-xs font-black`}>
-                {currentUser.name[0]?.toUpperCase()}
-              </div>
-              <span className="text-sm font-bold text-slate-600 hidden sm:block">{currentUser.name}</span>
+              {currentUser?.avatar ? (
+                <img src={currentUser.avatar} alt={currentUser.name} className="w-7 h-7 rounded-lg object-cover" />
+              ) : (
+                <div className={`w-7 h-7 rounded-lg ${USER_AVATAR_COLORS[currentUser?.color ?? 'indigo'] ?? 'bg-indigo-500'} flex items-center justify-center text-white text-xs font-black`}>
+                  {currentUser?.name[0]?.toUpperCase()}
+                </div>
+              )}
+              <span className="text-sm font-bold text-slate-600 hidden sm:block">{currentUser?.name}</span>
               <button
                 onClick={handleLogout}
                 title="Cerrar sesión"
@@ -414,8 +508,8 @@ const App: React.FC = () => {
                 transactions={transactions}
                 usdRate={usdRates.official}
                 onSettle={handleSettleSharedExpenses}
-                currentUserName={currentUser.name}
-                partnerName={users.find(u => u.id !== currentUser.id)?.name ?? 'Pareja'}
+                currentUserName={currentUser!.name}
+                partnerName={users.find(u => u.id !== currentUser!.id)?.name ?? 'Pareja'}
               />
             )}
             {view === 'settings' && (
@@ -425,7 +519,7 @@ const App: React.FC = () => {
                 usdRates={usdRates} onUpdateRates={setUsdRates}
                 n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl}
                 users={users} onUpdateUsers={handleUpdateUsers}
-                currentUserId={currentUser.id}
+                currentUserId={currentUser!.id}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}
@@ -481,8 +575,8 @@ const App: React.FC = () => {
           accounts={accounts}
           categories={categories}
           editData={editingTransaction || undefined}
-          currentUserName={currentUser.name}
-          partnerName={users.find(u => u.id !== currentUser.id)?.name ?? 'Pareja'}
+          currentUserName={currentUser!.name}
+          partnerName={users.find(u => u.id !== currentUser!.id)?.name ?? 'Pareja'}
         />
       )}
     </div>

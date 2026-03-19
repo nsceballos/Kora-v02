@@ -88,6 +88,8 @@ const Settings: React.FC<Props> = ({
     const newUser: UserConfig = {
       id: crypto.randomUUID(),
       name: '',
+      email: '',
+      avatar: '',
       pin: '',
       color: USER_COLORS[localUsers.length % USER_COLORS.length],
     };
@@ -121,8 +123,8 @@ const Settings: React.FC<Props> = ({
           <SectionHeader icon={Database} title="Google Sheets" color="emerald" />
           <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Web App URL</label>
-              <input 
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Web App URL (Legacy)</label>
+              <input
                 type="text"
                 placeholder="https://script.google.com/macros/s/.../exec"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs"
@@ -130,7 +132,13 @@ const Settings: React.FC<Props> = ({
                 onChange={e => setGoogleWebAppUrl(e.target.value)}
               />
               <p className="mt-2 text-[10px] text-slate-400 italic flex items-center gap-1">
-                <AlertCircle size={10} /> Pegar la URL de implementación de Apps Script.
+                <AlertCircle size={10} /> Fallback: URL de Apps Script (opcional si usas API directa).
+              </p>
+            </div>
+            <div className="pt-3 border-t border-slate-100">
+              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">API Directa</p>
+              <p className="text-[10px] text-slate-400">
+                La configuración de Google Sheets API (Client ID y Spreadsheet ID) se gestiona desde la pantalla de configuración inicial. Para reconfigurar, borra los datos de la app en localStorage.
               </p>
             </div>
           </div>

@@ -20,15 +20,18 @@ export enum Currency {
 export interface UserConfig {
   id: string;
   name: string;
+  email: string;
+  avatar: string;
   pin: string;
   color: 'indigo' | 'rose' | 'emerald' | 'amber' | 'cyan' | 'purple';
+  registeredAt?: string;
 }
 
 export const USER_COLORS: UserConfig['color'][] = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
 
 export const DEFAULT_USERS: UserConfig[] = [
-  { id: 'user1', name: 'Yo',     pin: '', color: 'indigo' },
-  { id: 'user2', name: 'Pareja', pin: '', color: 'rose'   },
+  { id: 'user1', name: 'Yo',     email: '', avatar: '', pin: '', color: 'indigo' },
+  { id: 'user2', name: 'Pareja', email: '', avatar: '', pin: '', color: 'rose'   },
 ];
 
 export interface Transaction {
