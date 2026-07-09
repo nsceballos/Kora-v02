@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.kora-gradient {
+  background: linear-gradient(135deg, #00d2ff 0%, #9d50bb 50%, #6e48aa 100%);
+}
+
+.kora-text-gradient {
+  background: linear-gradient(135deg, #00d2ff 0%, #9d50bb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.kora-bg-deep {
+  background-color: #0f172a;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

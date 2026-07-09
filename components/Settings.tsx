@@ -316,9 +316,17 @@ interface SectionHeaderProps {
   color: string;
 }
 
+const SECTION_COLORS: Record<string, string> = {
+  emerald: 'bg-emerald-50 text-emerald-600',
+  indigo: 'bg-indigo-50 text-indigo-600',
+  cyan: 'bg-cyan-50 text-cyan-600',
+  rose: 'bg-rose-50 text-rose-600',
+  slate: 'bg-slate-50 text-slate-600',
+};
+
 const SectionHeader: React.FC<SectionHeaderProps> = ({ icon: Icon, title, color }) => (
   <div className="flex items-center gap-3">
-    <div className={`p-2 bg-${color}-50 text-${color}-600 rounded-xl`}>
+    <div className={`p-2 rounded-xl ${SECTION_COLORS[color] ?? SECTION_COLORS.slate}`}>
       <Icon size={20} />
     </div>
     <h3 className="text-lg font-bold text-slate-800">{title}</h3>

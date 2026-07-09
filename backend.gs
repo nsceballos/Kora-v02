@@ -8,7 +8,9 @@ const SHEETS = {
   ACCOUNTS: 'Cuentas',
   CATEGORIES: 'Categorias',
   BUDGETS: 'Presupuestos',
-  USERS: 'Usuarios'
+  USERS: 'Usuarios',
+  SETTLEMENTS: 'Cierres',
+  CONFIG: 'Config'
 };
 
 /**
@@ -65,6 +67,8 @@ function doPost(e) {
       case 'getUsers': result = getUsers(); break;
       case 'saveUser': result = saveUser(data); break;
       case 'deleteUser': result = deleteRow(SHEETS.USERS, data.id); break;
+      case 'saveSettlement': result = saveSettlement(data); break;
+      case 'saveConfig': result = saveConfig(data); break;
       default: result = { error: "Action '" + action + "' not recognized" };
     }
   } catch (err) {
@@ -90,6 +94,8 @@ function setupDatabase() {
   initSheet(SHEETS.ACCOUNTS, ['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento']);
   initSheet(SHEETS.BUDGETS, ['Categoria', 'Limite']);
   initSheet(SHEETS.USERS, ['ID', 'Nombre', 'Email', 'Avatar', 'Color', 'PIN', 'FechaRegistro']);
+  initSheet(SHEETS.SETTLEMENTS, ['ID', 'Fecha', 'Periodo', 'Total', 'UsuarioA', 'PagoA', 'PorcentajeA', 'UsuarioB', 'PagoB', 'PorcentajeB', 'Deudor', 'Acreedor', 'Monto', 'Movimientos']);
+  initSheet(SHEETS.CONFIG, ['Clave', 'Valor']);
 }
 
 function initSheet(name, headers) {
@@ -99,12 +105,52 @@ function initSheet(name, headers) {
 
 function getAppData() {
   setupDatabase();
+  const config = {};
+  getSheetData(SHEETS.CONFIG).forEach(function(r) {
+    if (r.key) config[String(r.key)] = String(r.value !== undefined ? r.value : '');
+  });
   return {
     transactions: getSheetData(SHEETS.TRANSACTIONS),
     accounts: getSheetData(SHEETS.ACCOUNTS),
     categories: getSheetData(SHEETS.CATEGORIES).map(r => r.nombre || r.Nombre),
-    budgets: getSheetData(SHEETS.BUDGETS)
+    budgets: getSheetData(SHEETS.BUDGETS),
+    settlements: getSheetData(SHEETS.SETTLEMENTS),
+    config: config
   };
+}
+
+function saveSettlement(s) {
+  setupDatabase();
+  if (!s || !s.id) return { error: 'Cierre inválido' };
+  const sheet = SS.getSheetByName(SHEETS.SETTLEMENTS);
+  const data = sheet.getDataRange().getValues();
+  let rowIdx = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(s.id)) { rowIdx = i + 1; break; }
+  }
+  const vals = [
+    s.id, s.date, s.period, s.total,
+    s.userA, s.paidA, s.percentA,
+    s.userB, s.paidB, s.percentB,
+    s.debtor || '', s.creditor || '', s.amount, s.txCount
+  ];
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, vals.length).setValues([vals]);
+  else sheet.appendRow(vals);
+  return { success: true, id: s.id };
+}
+
+function saveConfig(data) {
+  setupDatabase();
+  if (!data || !data.key) return { error: 'Config inválida' };
+  const sheet = SS.getSheetByName(SHEETS.CONFIG);
+  const rows = sheet.getDataRange().getValues();
+  let rowIdx = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.key)) { rowIdx = i + 1; break; }
+  }
+  if (rowIdx !== -1) sheet.getRange(rowIdx, 1, 1, 2).setValues([[data.key, data.value]]);
+  else sheet.appendRow([data.key, data.value]);
+  return { success: true };
 }
 
 function saveTransaction(t) {
@@ -219,7 +265,11 @@ function toCamelCase(str) {
     'Responsable': 'paidBy', 'Saldado': 'isSettled', 'Nombre': 'name',
     'Saldo': 'balance', 'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit',
     'Email': 'email', 'Avatar': 'avatar', 'Color': 'color', 'PIN': 'pin', 'FechaRegistro': 'registeredAt',
-    'Subcategoria': 'subcategory'
+    'Subcategoria': 'subcategory',
+    'Periodo': 'period', 'Total': 'total', 'UsuarioA': 'userA', 'PagoA': 'paidA',
+    'PorcentajeA': 'percentA', 'UsuarioB': 'userB', 'PagoB': 'paidB', 'PorcentajeB': 'percentB',
+    'Deudor': 'debtor', 'Acreedor': 'creditor', 'Movimientos': 'txCount',
+    'Clave': 'key', 'Valor': 'value'
   };
   return map[str] || str.toLowerCase().replace(/\s/g, '');
 }

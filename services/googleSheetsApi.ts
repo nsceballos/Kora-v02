@@ -14,6 +14,8 @@ const SHEET_NAMES = {
   CATEGORIES: 'Categorias',
   BUDGETS: 'Presupuestos',
   USERS: 'Usuarios',
+  SETTLEMENTS: 'Cierres',
+  CONFIG: 'Config',
 };
 
 // Headers for each sheet
@@ -23,6 +25,8 @@ const SHEET_HEADERS: Record<string, string[]> = {
   [SHEET_NAMES.CATEGORIES]: ['Nombre'],
   [SHEET_NAMES.BUDGETS]: ['Categoria', 'Limite'],
   [SHEET_NAMES.USERS]: ['ID', 'Nombre', 'Email', 'Avatar', 'Color', 'PIN', 'FechaRegistro'],
+  [SHEET_NAMES.SETTLEMENTS]: ['ID', 'Fecha', 'Periodo', 'Total', 'UsuarioA', 'PagoA', 'PorcentajeA', 'UsuarioB', 'PagoB', 'PorcentajeB', 'Deudor', 'Acreedor', 'Monto', 'Movimientos'],
+  [SHEET_NAMES.CONFIG]: ['Clave', 'Valor'],
 };
 
 // camelCase mapping (same as backend.gs toCamelCase)
@@ -35,6 +39,10 @@ const HEADER_MAP: Record<string, string> = {
   'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit',
   'Email': 'email', 'Avatar': 'avatar', 'Color': 'color', 'PIN': 'pin',
   'FechaRegistro': 'registeredAt',
+  'Periodo': 'period', 'Total': 'total', 'UsuarioA': 'userA', 'PagoA': 'paidA',
+  'PorcentajeA': 'percentA', 'UsuarioB': 'userB', 'PagoB': 'paidB',
+  'PorcentajeB': 'percentB', 'Deudor': 'debtor', 'Acreedor': 'creditor',
+  'Movimientos': 'txCount', 'Clave': 'key', 'Valor': 'value',
 };
 
 function toCamelCase(header: string): string {
@@ -118,7 +126,8 @@ async function readSheet(sheetName: string): Promise<any[]> {
       headers.forEach((h: string, i: number) => {
         let val: any = row[i] !== undefined ? row[i] : '';
         // Type conversions
-        if (h === 'Monto' || h === 'Saldo' || h === 'Limite') {
+        const NUMERIC_HEADERS = ['Monto', 'Saldo', 'Limite', 'Total', 'PagoA', 'PorcentajeA', 'PagoB', 'PorcentajeB', 'Movimientos'];
+        if (NUMERIC_HEADERS.includes(h)) {
           val = parseFloat(val) || 0;
         }
         if (h === 'Compartido' || h === 'Saldado') {
@@ -225,18 +234,25 @@ export const googleSheetsApi = {
 
   /** Get all app data */
   async getAppData() {
-    const [transactions, accounts, categories, budgets] = await Promise.all([
+    const [transactions, accounts, categories, budgets, settlements, configRows] = await Promise.all([
       readSheet(SHEET_NAMES.TRANSACTIONS),
       readSheet(SHEET_NAMES.ACCOUNTS),
       readSheet(SHEET_NAMES.CATEGORIES),
       readSheet(SHEET_NAMES.BUDGETS),
+      readSheet(SHEET_NAMES.SETTLEMENTS),
+      readSheet(SHEET_NAMES.CONFIG),
     ]);
+
+    const config: Record<string, string> = {};
+    configRows.forEach((r: any) => { if (r.key) config[String(r.key)] = String(r.value ?? ''); });
 
     return {
       transactions: transactions.filter(t => t.id && t.amount !== undefined),
       accounts: accounts.filter(a => a.id && a.balance !== undefined),
       categories: categories.map(r => r.name || r.nombre).filter(Boolean),
       budgets,
+      settlements: settlements.filter(s => s.id),
+      config,
     };
   },
 
@@ -284,6 +300,24 @@ export const googleSheetsApi = {
       method: 'PUT',
       body: JSON.stringify({ range: SHEET_NAMES.BUDGETS, values }),
     });
+    return true;
+  },
+
+  /** Save a monthly settlement (cierre) record */
+  async saveSettlement(s: any): Promise<boolean> {
+    const vals = [
+      s.id, s.date, s.period, s.total,
+      s.userA, s.paidA, s.percentA,
+      s.userB, s.paidB, s.percentB,
+      s.debtor || '', s.creditor || '', s.amount, s.txCount,
+    ];
+    await upsertRow(SHEET_NAMES.SETTLEMENTS, s.id, vals);
+    return true;
+  },
+
+  /** Save a config key/value pair */
+  async saveConfig(key: string, value: string): Promise<boolean> {
+    await upsertRow(SHEET_NAMES.CONFIG, key, [key, value]);
     return true;
   },
 

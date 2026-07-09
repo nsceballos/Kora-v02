@@ -13,7 +13,7 @@ import {
   AlertCircle,
   LogOut,
 } from 'lucide-react';
-import { Transaction, TransactionType, Account, Currency, Budget, UserConfig, DEFAULT_USERS } from './types';
+import { Transaction, TransactionType, Account, Currency, Budget, UserConfig, DEFAULT_USERS, Settlement, SplitPercents } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionsList from './components/TransactionsList';
 import AccountsManager from './components/AccountsManager';
@@ -46,6 +46,8 @@ const App: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [splitPercents, setSplitPercents] = useState<SplitPercents>({});
   const [usdRates, setUsdRates] = useState({ blue: 1240, official: 980 });
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('');
 
@@ -166,6 +168,8 @@ const App: React.FC = () => {
     setGoogleUser(null);
     setTransactions([]);
     setAccounts([]);
+    setSettlements([]);
+    setSplitPercents({});
     setIsLoading(true);
     setPhase('login');
   };
@@ -219,6 +223,13 @@ const App: React.FC = () => {
         setAccounts(data.accounts);
         if (data.categories?.length > 0) setCategories(data.categories);
         if (data.budgets?.length > 0) setBudgets(data.budgets);
+        setSettlements(data.settlements ?? []);
+        if (data.config?.split_percents) {
+          try {
+            const parsed = JSON.parse(data.config.split_percents);
+            if (parsed && typeof parsed === 'object') setSplitPercents(parsed);
+          } catch {}
+        }
       }
 
       const savedRates = localStorage.getItem('finance_arch_rates');
@@ -293,21 +304,36 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSettleSharedExpenses = async () => {
+  /** Cierre mensual: marca los gastos compartidos pendientes como saldados y registra el cierre */
+  const handleMonthlyClose = async (settlement: Settlement) => {
     const pendingShared = transactions.filter(t => t.isShared && !t.isSettled);
     if (pendingShared.length === 0) return;
 
     const settled = pendingShared.map(t => ({ ...t, isSettled: true }));
     setTransactions(prev => prev.map(t => settled.find(s => s.id === t.id) || t));
+    setSettlements(prev => [settlement, ...prev]);
     setIsSyncing(true);
 
     try {
-      await Promise.all(settled.map(t => sheetService.saveTransaction(t)));
+      await Promise.all([
+        sheetService.saveSettlement(settlement),
+        ...settled.map(t => sheetService.saveTransaction(t)),
+      ]);
       showSuccessToast();
     } catch (e) {
-      console.error("Error saldando gastos compartidos:", e);
+      console.error("Error cerrando el mes:", e);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  /** Actualiza el % de aporte de cada usuario (persiste en Google Sheets) */
+  const handleUpdateSplit = async (percents: SplitPercents) => {
+    setSplitPercents(percents);
+    try {
+      await sheetService.saveConfig('split_percents', JSON.stringify(percents));
+    } catch (e) {
+      console.error("Error guardando reparto:", e);
     }
   };
 
@@ -507,9 +533,12 @@ const App: React.FC = () => {
               <SharedExpenses
                 transactions={transactions}
                 usdRate={usdRates.official}
-                onSettle={handleSettleSharedExpenses}
-                currentUserName={currentUser!.name}
-                partnerName={users.find(u => u.id !== currentUser!.id)?.name ?? 'Pareja'}
+                onSettle={handleMonthlyClose}
+                currentUser={currentUser!}
+                partner={users.find(u => u.id !== currentUser!.id) ?? null}
+                settlements={settlements}
+                splitPercents={splitPercents}
+                onUpdateSplit={handleUpdateSplit}
               />
             )}
             {view === 'settings' && (

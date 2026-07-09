@@ -1,4 +1,4 @@
-import { Transaction, Account, AppData, Budget, UserConfig, DEFAULT_USERS } from '../types';
+import { Transaction, Account, AppData, Budget, UserConfig, DEFAULT_USERS, Settlement } from '../types';
 import { googleAuth } from './googleAuth';
 import { googleSheetsApi } from './googleSheetsApi';
 
@@ -97,7 +97,7 @@ async function runGasAction(action: string, data?: any, retries = 2): Promise<an
 
 export const sheetService = {
   async getAppData(): Promise<AppData> {
-    const fallback: AppData = { transactions: [], accounts: [], categories: [], budgets: [] };
+    const fallback: AppData = { transactions: [], accounts: [], categories: [], budgets: [], settlements: [], config: {} };
 
     try {
       let result: any;
@@ -117,7 +117,11 @@ export const sheetService = {
             a && typeof a.id === 'string' && typeof a.balance === 'number'
           ),
           categories: Array.isArray(result.categories) ? result.categories.filter(Boolean) : [],
-          budgets: Array.isArray(result.budgets) ? result.budgets : []
+          budgets: Array.isArray(result.budgets) ? result.budgets : [],
+          settlements: Array.isArray(result.settlements)
+            ? result.settlements.filter((s: any) => s && s.id)
+            : [],
+          config: (result.config && typeof result.config === 'object') ? result.config : {},
         };
         localStorage.setItem('finance_arch_data', JSON.stringify(data));
         return data;
@@ -128,7 +132,15 @@ export const sheetService = {
 
     try {
       const stored = localStorage.getItem('finance_arch_data');
-      if (stored) return JSON.parse(stored) as AppData;
+      if (stored) {
+        const cached = JSON.parse(stored);
+        return {
+          ...fallback,
+          ...cached,
+          settlements: Array.isArray(cached.settlements) ? cached.settlements : [],
+          config: (cached.config && typeof cached.config === 'object') ? cached.config : {},
+        } as AppData;
+      }
     } catch {
       console.warn("Caché local corrupta, usando estado vacío.");
     }
@@ -153,6 +165,8 @@ export const sheetService = {
             case 'deleteAccount': await googleSheetsApi.deleteAccount(item.data.id); break;
             case 'saveUser': await googleSheetsApi.saveUser(item.data); break;
             case 'deleteUser': await googleSheetsApi.deleteUser(item.data.id); break;
+            case 'saveSettlement': await googleSheetsApi.saveSettlement(item.data); break;
+            case 'saveConfig': await googleSheetsApi.saveConfig(item.data.key, item.data.value); break;
             default: newQueue.push(item);
           }
         } else {
@@ -199,6 +213,18 @@ export const sheetService = {
   async deleteAccount(id: string): Promise<boolean> {
     if (isGoogleApiMode()) return googleSheetsApi.deleteAccount(id);
     const res = await runGasAction('deleteAccount', { id });
+    return !!res;
+  },
+
+  async saveSettlement(s: Settlement): Promise<boolean> {
+    if (isGoogleApiMode()) return googleSheetsApi.saveSettlement(s);
+    const res = await runGasAction('saveSettlement', s);
+    return !!res;
+  },
+
+  async saveConfig(key: string, value: string): Promise<boolean> {
+    if (isGoogleApiMode()) return googleSheetsApi.saveConfig(key, value);
+    const res = await runGasAction('saveConfig', { key, value });
     return !!res;
   },
 
