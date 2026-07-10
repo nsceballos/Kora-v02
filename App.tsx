@@ -21,10 +21,9 @@ import SharedExpenses from './components/SharedExpenses';
 import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
-import { sheetService } from './services/sheetService';
-import { googleAuth, GoogleUser } from './services/googleAuth';
+import { sheetService, accessToken, UnauthorizedError } from './services/sheetService';
 import LoginScreen from './components/LoginScreen';
-import SetupScreen from './components/SetupScreen';
+import UnlockScreen from './components/UnlockScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
@@ -38,7 +37,7 @@ const USER_AVATAR_COLORS: Record<string, string> = {
 };
 
 type AppView = 'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings';
-type AppPhase = 'loading' | 'setup' | 'login' | 'app';
+type AppPhase = 'loading' | 'unlock' | 'login' | 'app';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('dashboard');
@@ -55,106 +54,50 @@ const App: React.FC = () => {
   const [phase, setPhase] = useState<AppPhase>('loading');
   const [users, setUsers] = useState<UserConfig[]>(DEFAULT_USERS);
   const [currentUser, setCurrentUser] = useState<UserConfig | null>(null);
-  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
 
   // ── Bootstrap: determine initial phase ──────────────────────
-  useEffect(() => {
-    const bootstrap = async () => {
-      // Step 1: Check if Google API config exists
-      if (!googleAuth.isConfigured()) {
-        setPhase('setup');
+  const bootstrap = useCallback(async () => {
+    setPhase('loading');
+
+    // Load users from the service-account backed API. A 401 means the server
+    // has an access token configured and we need the user to unlock first.
+    let loadedUsers: UserConfig[] = [];
+    try {
+      loadedUsers = await sheetService.getUsers();
+      if (loadedUsers.length > 0) setUsers(loadedUsers);
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        setPhase('unlock');
         return;
       }
-
-      // Step 2: Initialize Google APIs
-      try {
-        await googleAuth.initGapi();
-        googleAuth.initGis();
-      } catch (e) {
-        console.warn('Google API init error:', e);
-      }
-
-      // Step 3: Try to restore Google session
-      const restored = await googleAuth.tryRestoreSession();
-      if (restored) {
-        setGoogleUser(restored);
-        // Register/find user in Sheets and auto-login
-        try {
-          const user = await sheetService.registerGoogleUser(restored);
-          setCurrentUser(user);
-          sessionStorage.setItem('kora_session', JSON.stringify(user));
-
-          // Load all users for the app
-          const allUsers = await sheetService.getUsers();
-          setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
-
-          setPhase('app');
-          return;
-        } catch (e) {
-          console.error('Error restoring session:', e);
-        }
-      }
-
-      // Step 4: Try to restore legacy session (PIN-based users)
-      try {
-        const session = sessionStorage.getItem('kora_session');
-        if (session) {
-          const sessionUser: UserConfig = JSON.parse(session);
-          setCurrentUser(sessionUser);
-
-          const allUsers = await sheetService.getUsers();
-          setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
-
-          setPhase('app');
-          return;
-        }
-      } catch {}
-
-      // Step 5: Load users for login screen
-      try {
-        const loadedUsers = await sheetService.getUsers();
-        if (loadedUsers.length > 0) setUsers(loadedUsers);
-      } catch {}
-
-      setPhase('login');
-    };
-
-    bootstrap();
-  }, []);
-
-  // ── Setup handler ───────────────────────────────────────────
-  const handleSetup = async (config: { clientId: string; spreadsheetId: string }) => {
-    googleAuth.saveConfig(config);
-
-    // Initialize Google APIs with new config
-    try {
-      await googleAuth.initGapi();
-      googleAuth.initGis();
-    } catch (e) {
-      console.warn('Google API init after setup:', e);
+      console.warn('Error cargando usuarios:', e);
     }
 
+    // Restore a previous profile session if present.
+    try {
+      const session = sessionStorage.getItem('kora_session');
+      if (session) {
+        const sessionUser: UserConfig = JSON.parse(session);
+        // Prefer the fresh copy from the sheet (name/color may have changed).
+        const fresh = loadedUsers.find(u => u.id === sessionUser.id) ?? sessionUser;
+        setCurrentUser(fresh);
+        setPhase('app');
+        return;
+      }
+    } catch {}
+
     setPhase('login');
+  }, []);
+
+  useEffect(() => { bootstrap(); }, [bootstrap]);
+
+  // ── Unlock handler (shared access token) ────────────────────
+  const handleUnlock = async (token: string) => {
+    accessToken.set(token);
+    await bootstrap();
   };
 
-  // ── Google Login handler ────────────────────────────────────
-  const handleGoogleLogin = async () => {
-    const gUser = await googleAuth.requestAccessToken();
-    setGoogleUser(gUser);
-
-    // Register/find user in Google Sheets
-    const user = await sheetService.registerGoogleUser(gUser);
-    setCurrentUser(user);
-    sessionStorage.setItem('kora_session', JSON.stringify(user));
-
-    // Load all users
-    const allUsers = await sheetService.getUsers();
-    setUsers(allUsers.length > 0 ? allUsers : DEFAULT_USERS);
-
-    setPhase('app');
-  };
-
-  // ── Legacy profile login handler ───────────────────────────
+  // ── Profile login handler ──────────────────────────────────
   const handleLogin = (user: UserConfig) => {
     sessionStorage.setItem('kora_session', JSON.stringify(user));
     setCurrentUser(user);
@@ -162,10 +105,8 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-    googleAuth.logout();
     sessionStorage.removeItem('kora_session');
     setCurrentUser(null);
-    setGoogleUser(null);
     setTransactions([]);
     setAccounts([]);
     setSettlements([]);
@@ -238,6 +179,12 @@ const App: React.FC = () => {
       const savedWebhook = localStorage.getItem('finance_arch_n8n_webhook');
       if (savedWebhook) setN8nWebhookUrl(savedWebhook);
     } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        setIsLoading(false);
+        setIsSyncing(false);
+        setPhase('unlock');
+        return;
+      }
       console.error("Error init:", e);
       setSyncError("Modo Offline");
     } finally {
@@ -416,14 +363,9 @@ const App: React.FC = () => {
     );
   }
 
-  // ── Phase: Setup (first time configuration) ─────────────────
-  if (phase === 'setup') {
-    return (
-      <SetupScreen
-        onSave={handleSetup}
-        initialConfig={googleAuth.getConfig()}
-      />
-    );
+  // ── Phase: Unlock (server requires an access token) ─────────
+  if (phase === 'unlock') {
+    return <UnlockScreen onUnlock={handleUnlock} />;
   }
 
   // ── Phase: Login ────────────────────────────────────────────
@@ -432,8 +374,6 @@ const App: React.FC = () => {
       <LoginScreen
         users={users}
         onLogin={handleLogin}
-        onGoogleLogin={handleGoogleLogin}
-        isGoogleAuthEnabled={googleAuth.isConfigured()}
       />
     );
   }
