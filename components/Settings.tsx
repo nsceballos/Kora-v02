@@ -36,14 +36,11 @@ const Settings: React.FC<Props> = ({
   const [newCat, setNewCat] = useState('');
   const [localRates, setLocalRates] = useState(usdRates);
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
-  const [googleWebAppUrl, setGoogleWebAppUrl] = useState('');
   const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
   const [localUsers, setLocalUsers] = useState<UserConfig[]>(users);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('finance_arch_google_webapp_url');
-    if (saved) setGoogleWebAppUrl(saved);
     setLocalBudgets(budgets);
   }, [budgets]);
 
@@ -75,7 +72,6 @@ const Settings: React.FC<Props> = ({
     onUpdateWebhookUrl(localWebhook);
     setBudgets(localBudgets);
     onUpdateUsers(localUsers);
-    localStorage.setItem('finance_arch_google_webapp_url', googleWebAppUrl.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -121,26 +117,22 @@ const Settings: React.FC<Props> = ({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10">
         <section className="space-y-6">
           <SectionHeader icon={Database} title="Google Sheets" color="emerald" />
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Web App URL (Legacy)</label>
-              <input
-                type="text"
-                placeholder="https://script.google.com/macros/s/.../exec"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs"
-                value={googleWebAppUrl}
-                onChange={e => setGoogleWebAppUrl(e.target.value)}
-              />
-              <p className="mt-2 text-[10px] text-slate-400 italic flex items-center gap-1">
-                <AlertCircle size={10} /> Fallback: URL de Apps Script (opcional si usas API directa).
-              </p>
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-emerald-500" />
+              <p className="text-sm font-bold text-slate-700">Conectado vía cuenta de servicio</p>
             </div>
-            <div className="pt-3 border-t border-slate-100">
-              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">API Directa</p>
-              <p className="text-[10px] text-slate-400">
-                La configuración de Google Sheets API (Client ID y Spreadsheet ID) se gestiona desde la pantalla de configuración inicial. Para reconfigurar, borra los datos de la app en localStorage.
-              </p>
-            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Los datos se guardan en tu hoja de cálculo a través de una cuenta de servicio de Google.
+              Las credenciales se configuran como variables de entorno en el servidor (Vercel):
+              <span className="font-mono text-slate-500"> GOOGLE_SERVICE_ACCOUNT_EMAIL</span>,
+              <span className="font-mono text-slate-500"> GOOGLE_PRIVATE_KEY</span> y
+              <span className="font-mono text-slate-500"> GOOGLE_SHEET_ID</span>.
+              No hay nada que configurar desde la app.
+            </p>
+            <p className="text-[10px] text-slate-400 italic flex items-center gap-1 pt-1">
+              <AlertCircle size={10} /> Recordá compartir la hoja con el email de la cuenta de servicio (como Editor).
+            </p>
           </div>
         </section>
 
@@ -316,9 +308,17 @@ interface SectionHeaderProps {
   color: string;
 }
 
+const SECTION_COLORS: Record<string, string> = {
+  emerald: 'bg-emerald-50 text-emerald-600',
+  indigo: 'bg-indigo-50 text-indigo-600',
+  cyan: 'bg-cyan-50 text-cyan-600',
+  rose: 'bg-rose-50 text-rose-600',
+  slate: 'bg-slate-50 text-slate-600',
+};
+
 const SectionHeader: React.FC<SectionHeaderProps> = ({ icon: Icon, title, color }) => (
   <div className="flex items-center gap-3">
-    <div className={`p-2 bg-${color}-50 text-${color}-600 rounded-xl`}>
+    <div className={`p-2 rounded-xl ${SECTION_COLORS[color] ?? SECTION_COLORS.slate}`}>
       <Icon size={20} />
     </div>
     <h3 className="text-lg font-bold text-slate-800">{title}</h3>

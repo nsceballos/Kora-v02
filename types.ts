@@ -66,11 +66,43 @@ export interface Budget {
   limit: number;
 }
 
+/** Registro de un cierre mensual de gastos compartidos */
+export interface Settlement {
+  id: string;
+  /** Fecha en que se realizó el cierre (YYYY-MM-DD) */
+  date: string;
+  /** Período que abarca, ej. "Julio 2026" o "2026-07" */
+  period: string;
+  /** Total de gastos compartidos (en ARS) incluidos en el cierre */
+  total: number;
+  userA: string;
+  paidA: number;
+  percentA: number;
+  userB: string;
+  paidB: number;
+  percentB: number;
+  /** Quién debía transferir */
+  debtor: string;
+  /** Quién recibía la transferencia */
+  creditor: string;
+  /** Monto transferido (en ARS). 0 si quedaron a mano. */
+  amount: number;
+  /** Cantidad de movimientos saldados en este cierre */
+  txCount: number;
+}
+
+/** Porcentaje de aporte por usuario (id → %). Debe sumar 100. Default 50/50. */
+export type SplitPercents = Record<string, number>;
+
+export const DEFAULT_SPLIT = 50;
+
 export interface AppData {
   transactions: Transaction[];
   accounts: Account[];
   categories: string[];
   budgets: Budget[];
+  settlements: Settlement[];
+  config: Record<string, string>;
 }
 
 export const formatCurrency = (amount: number, currency: Currency = Currency.ARS) => {
