@@ -67,6 +67,9 @@ export async function handleRequest(req: HandlerRequest): Promise<HandlerResult>
     if (message === 'FORBIDDEN') {
       return { status: 403, body: { error: 'FORBIDDEN' } };
     }
+    if (message === 'IMPORT_TOO_LARGE') {
+      return { status: 400, body: { error: 'El archivo tiene demasiados movimientos. Importá hasta 2000 por vez.' } };
+    }
     if (message.startsWith('Acción no reconocida')) {
       return { status: 400, body: { error: message } };
     }
