@@ -6,9 +6,9 @@
  * middleware so behaviour is identical locally and in production.
  */
 
-import { createSheetsClient } from './_sheetsCore';
-import { getServiceAccountToken, getSpreadsheetId } from './_serviceAccount';
-import { signSessionToken, hashPassword, comparePassword } from './_auth';
+import { createSheetsClient } from './_sheetsCore.js';
+import { getServiceAccountToken, getSpreadsheetId } from './_serviceAccount.js';
+import { signSessionToken, hashPassword, comparePassword } from './_auth.js';
 
 export interface AuthHandlerRequest {
   action?: 'register' | 'login';
