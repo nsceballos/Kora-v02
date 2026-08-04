@@ -56,6 +56,9 @@ const BOOL_HEADERS = ['Compartido', 'Saldado'];
 
 const AVATAR_COLORS = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
 
+/** Tope por importación, para no exceder los límites de la API de Sheets en una sola llamada. */
+const MAX_IMPORT_ROWS = 2000;
+
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 function toCamelCase(header: string): string {
@@ -282,6 +285,40 @@ export function createSheetsClient(opts: SheetsClientOptions) {
       return { success: true, id: t.id };
     },
 
+    /**
+     * Alta masiva de movimientos (importación desde .xlsx).
+     *
+     * Escribe todas las filas en una sola llamada a Sheets: guardarlas una por
+     * una costaría 3+ llamadas por fila y con unos cientos de movimientos
+     * chocaría contra los límites de la API. Los IDs se generan acá y no se
+     * toman del cliente, para que no pueda colisionar con filas existentes.
+     */
+    async importTransactions(userId: string, transactions: any[]) {
+      if (!Array.isArray(transactions) || transactions.length === 0) {
+        return { success: true, imported: 0 };
+      }
+      if (transactions.length > MAX_IMPORT_ROWS) {
+        throw new Error('IMPORT_TOO_LARGE');
+      }
+
+      await ensureSheet(SHEET_NAMES.TRANSACTIONS);
+
+      const values = transactions.map(t => [
+        randomUUID(), userId, t.date, t.concept, t.amount, t.currency,
+        t.category || 'Varios', t.subcategory || '', t.sourceAccount,
+        t.destinationAccount || '', t.type,
+        t.isShared ? 'SI' : 'NO', t.paidBy || '',
+        t.isSettled ? 'SI' : 'NO',
+      ]);
+
+      await apiRequest(
+        `${baseUrl}/values/${encodeURIComponent(SHEET_NAMES.TRANSACTIONS)}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+        { method: 'POST', body: JSON.stringify({ values }) },
+      );
+
+      return { success: true, imported: values.length };
+    },
+
     async saveAccount(userId: string, acc: any) {
       if (!acc || !acc.id) return { error: 'Cuenta inválida' };
       await assertOwnedOrNew(SHEET_NAMES.ACCOUNTS, acc.id, userId);
@@ -394,7 +431,7 @@ export function createSheetsClient(opts: SheetsClientOptions) {
 export type SheetsClient = ReturnType<typeof createSheetsClient>;
 
 export type SheetAction =
-  | 'getAppData' | 'saveTransaction' | 'saveAccount' | 'saveCategories'
+  | 'getAppData' | 'saveTransaction' | 'importTransactions' | 'saveAccount' | 'saveCategories'
   | 'saveBudgets' | 'saveSettlement' | 'saveConfig' | 'deleteTransaction'
   | 'deleteAccount' | 'updateProfile' | 'changePassword';
 
@@ -403,6 +440,7 @@ export async function handleAction(client: SheetsClient, action: string, userId:
   switch (action as SheetAction) {
     case 'getAppData': return client.getAppData(userId);
     case 'saveTransaction': return client.saveTransaction(userId, data);
+    case 'importTransactions': return client.importTransactions(userId, data);
     case 'saveAccount': return client.saveAccount(userId, data);
     case 'saveCategories': return client.saveCategories(userId, data);
     case 'saveBudgets': return client.saveBudgets(userId, data);

@@ -8,6 +8,8 @@ Kora es una suite de gestión financiera personal diseñada para ser inteligente
 - **Control de Cuentas**: Seguimiento de Débito, Crédito, Inversiones y Efectivo.
 - **Gastos Compartidos (informativo y privado)**: podés marcar un gasto como "compartido" y anotar quién lo pagó (vos o tu pareja) para llevar la cuenta de cuánto le corresponde a cada uno y quién le debe a quién. Es una ayuda personal: la persona con la que compartís gastos no necesita cuenta en Kora y jamás ve esta información — solo vos.
 - **Cierre Mensual**: Liquidación de gastos compartidos a fin de mes con historial de cierres.
+- **Importación desde Excel**: cargá un `.xlsx` con tus movimientos y Kora los adapta a la estructura de la app (ver abajo).
+- **Cotización automática**: el valor del dólar (oficial y blue) se trae solo de una API pública; la valuación de tenencias en USD usa el **oficial (venta)**.
 - **Kora AI**: Integración con n8n para consultas inteligentes sobre tus finanzas.
 - **Sincronización Cloud**: Google Sheets como base de datos, vía una API serverless con cuenta de servicio, con cola offline.
 
@@ -103,6 +105,29 @@ La app crea automáticamente estas hojas en el spreadsheet:
 Ningún endpoint expone el contenido de `Usuarios` (ni siquiera la contraseña hasheada) al cliente: solo se usa server-side para autenticar.
 
 > El archivo `backend.gs` (Google Apps Script) quedó como referencia histórica de un backend alternativo previo a la cuenta de servicio; no se usa ni está actualizado al esquema actual con `UserId`.
+
+## Importar movimientos desde un .xlsx
+Desde **Ajustes → Importar movimientos**. El archivo se lee en el navegador (no se sube a ningún lado) y debe tener estas columnas en la primera fila:
+
+| Columna | Contenido | Obligatoria |
+|---|---|---|
+| `Período` | Fecha del movimiento | Sí |
+| `Cuentas` | Cuenta donde ocurre el movimiento | Sí |
+| `Categoría` | Categoría del gasto o ingreso | No |
+| `Nota` | Comentario breve. **Si empieza con `X`, el movimiento se marca como gasto compartido** | No |
+| `Ingreso/Gasto` | Tipo de movimiento | Sí |
+| `Importe` | Monto en la moneda de la columna `Moneda` | Sí |
+| `Moneda` | `ARS` o `USD` (si se omite, se asume `ARS`) | No |
+
+Detalles del formato:
+- Los encabezados se reconocen sin distinguir mayúsculas ni acentos, y aceptan sinónimos (`Fecha`, `Cuenta`, `Rubro`, `Detalle`, `Tipo`, `Monto`, `Divisa`).
+- Las fechas pueden venir como fecha de Excel o como texto en formato argentino (`20/07/2026`) o ISO (`2026-07-20`).
+- Los importes aceptan formato argentino (`45.300,50`) y símbolos (`$`). Siempre se toma el valor absoluto: el signo lo define la columna `Ingreso/Gasto`.
+- La marca `X` de gasto compartido debe estar sola o seguida de un espacio o signo de puntuación, para no confundir notas que simplemente empiezan con esa letra (`Xiaomi` no se marca como compartido). La `X` se quita del concepto final.
+
+Antes de confirmar, Kora muestra un resumen y, **si alguna cuenta o categoría del archivo no existe todavía**, te deja elegir para cada una: crearla, reemplazarla por una existente, u omitir esas filas. Las cuentas nuevas se crean como *Débito* con saldo 0.
+
+> La importación **no modifica los saldos** de tus cuentas: se asume que son movimientos históricos y que el saldo actual ya los refleja.
 
 ## Cierre mensual de gastos compartidos
 En la vista **Gastos Pareja**:

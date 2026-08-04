@@ -40,6 +40,16 @@ const addToQueue = (action: string, data: any) => {
 
 // ── API runner ──────────────────────────────────────────────────
 
+const READ_ACTIONS = new Set(['getAppData']);
+
+/**
+ * Acciones que NO deben encolarse para reintentar más tarde: o bien el
+ * usuario está esperando un resultado real (importar, cambiar contraseña) y
+ * devolver "éxito" por haberla encolado sería mentirle, o bien reproducirlas
+ * fuera de contexto no tiene sentido. Estas fallan de forma explícita.
+ */
+const NON_QUEUEABLE_ACTIONS = new Set(['importTransactions', 'changePassword', 'updateProfile']);
+
 /**
  * Call the serverless API. Read actions (`getAppData`) return null on
  * network failure so callers fall back to cache. Write actions get queued
@@ -49,9 +59,20 @@ const addToQueue = (action: string, data: any) => {
  * just repeat the same failure.
  */
 async function apiAction(action: string, data?: any, retries = 2): Promise<any> {
-  const isRead = action === 'getAppData';
+  const isRead = READ_ACTIONS.has(action);
+  const canQueue = !isRead && !NON_QUEUEABLE_ACTIONS.has(action);
   const token = authService.getToken();
   if (!token) throw new UnauthorizedError();
+
+  /** Último intento fallido por red o 5xx: encola, cae a caché, o falla explícitamente. */
+  const giveUp = () => {
+    if (canQueue) {
+      addToQueue(action, data);
+      return { success: true, queued: true };
+    }
+    if (isRead) return null;
+    throw new Error('No se pudo conectar con el servidor. Revisá tu conexión e intentá de nuevo.');
+  };
 
   for (let i = 0; i <= retries; i++) {
     let response: Response;
@@ -66,13 +87,7 @@ async function apiAction(action: string, data?: any, retries = 2): Promise<any> 
       });
     } catch {
       // Network failure — retry, then fall back to cache/queue.
-      if (i === retries) {
-        if (!isRead) {
-          addToQueue(action, data);
-          return { success: true, queued: true };
-        }
-        return null;
-      }
+      if (i === retries) return giveUp();
       await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
       continue;
     }
@@ -81,13 +96,7 @@ async function apiAction(action: string, data?: any, retries = 2): Promise<any> 
 
     if (response.status >= 500) {
       // Transient server-side failure — retry, then fall back to cache/queue.
-      if (i === retries) {
-        if (!isRead) {
-          addToQueue(action, data);
-          return { success: true, queued: true };
-        }
-        return null;
-      }
+      if (i === retries) return giveUp();
       await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
       continue;
     }
@@ -168,6 +177,16 @@ export const sheetService = {
   async saveTransaction(t: Transaction): Promise<boolean> {
     const res = await apiAction('saveTransaction', t);
     return !!res;
+  },
+
+  /**
+   * Alta masiva desde el importador de .xlsx. El servidor asigna los IDs, así
+   * que después de importar hay que recargar los datos para verlos.
+   * Lanza un Error con el mensaje del servidor si la importación es rechazada.
+   */
+  async importTransactions(transactions: Omit<Transaction, 'id'>[]): Promise<number> {
+    const res = await apiAction('importTransactions', transactions);
+    return res?.imported ?? 0;
   },
 
   async saveAccount(acc: Account): Promise<boolean> {

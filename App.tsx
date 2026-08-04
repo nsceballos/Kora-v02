@@ -25,6 +25,7 @@ import { sheetService, UnauthorizedError } from './services/sheetService';
 import { authService } from './services/authService';
 import { ratesService } from './services/ratesService';
 import LoginScreen from './components/LoginScreen';
+import ImportModal from './components/ImportModal';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
@@ -125,6 +126,7 @@ const App: React.FC = () => {
 
   // ── Data loading ────────────────────────────────────────────
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -307,6 +309,34 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Importación masiva desde .xlsx: primero crea las cuentas y categorías que
+   * el usuario decidió dar de alta, después guarda los movimientos en una sola
+   * llamada. Al terminar recarga los datos, porque el servidor es quien asigna
+   * los IDs definitivos de cada movimiento.
+   */
+  const handleImport = async (
+    imported: Omit<Transaction, 'id'>[],
+    newAccounts: Account[],
+    newCategories: string[],
+  ): Promise<number> => {
+    setIsSyncing(true);
+    try {
+      if (newAccounts.length > 0) {
+        await Promise.all(newAccounts.map(acc => sheetService.saveAccount(acc)));
+      }
+      if (newCategories.length > 0) {
+        await sheetService.saveCategories([...categories, ...newCategories]);
+      }
+
+      const count = await sheetService.importTransactions(imported);
+      await init();
+      return count;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateBudgets = async (newBudgets: Budget[]) => {
     setBudgets(newBudgets);
     setIsSyncing(true);
@@ -472,6 +502,7 @@ const App: React.FC = () => {
                 onChangePassword={handleChangePassword}
                 partnerName={partnerName}
                 onUpdatePartnerName={handleUpdatePartnerName}
+                onOpenImport={() => setIsImportOpen(true)}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}
@@ -518,6 +549,17 @@ const App: React.FC = () => {
           <CheckCircle2 size={24} className="text-emerald-400" />
           <p className="text-xs font-bold uppercase tracking-widest">Guardado</p>
         </div>
+      )}
+
+      {isImportOpen && currentUser && (
+        <ImportModal
+          onClose={() => setIsImportOpen(false)}
+          accounts={accounts}
+          categories={categories}
+          currentUserName={currentUser.name}
+          partnerName={partnerName}
+          onImport={handleImport}
+        />
       )}
 
       {(isFormOpen || editingTransaction) && currentUser && (

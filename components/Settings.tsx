@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2, RefreshCw } from 'lucide-react';
+import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2, RefreshCw, FileSpreadsheet, Upload } from 'lucide-react';
 import { Budget, AuthUser, UsdRates } from '../types';
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   partnerName: string;
   onUpdatePartnerName: (name: string) => void;
+  onOpenImport: () => void;
 }
 
 const Settings: React.FC<Props> = ({
@@ -26,6 +27,7 @@ const Settings: React.FC<Props> = ({
   n8nWebhookUrl, onUpdateWebhookUrl,
   currentUser, onUpdateName, onChangePassword,
   partnerName, onUpdatePartnerName,
+  onOpenImport,
 }) => {
   const [newCat, setNewCat] = useState('');
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
@@ -110,6 +112,29 @@ const Settings: React.FC<Props> = ({
               Es solo una etiqueta para tus propios registros de "Gastos Compartidos" — no crea ni vincula
               ninguna otra cuenta. Esta información es privada: solo vos podés verla.
             </p>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <SectionHeader icon={FileSpreadsheet} title="Importar movimientos" color="emerald" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Cargá un archivo <b>.xlsx</b> con tus movimientos y Kora los adapta a la estructura de la app.
+              Si alguna cuenta o categoría del archivo no existe todavía, vas a poder elegir si crearla o
+              reemplazarla por una existente antes de confirmar.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {['Período', 'Cuentas', 'Categoría', 'Nota', 'Ingreso/Gasto', 'Importe', 'Moneda'].map(c => (
+                <span key={c} className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-500">{c}</span>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={onOpenImport}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-slate-900 text-white text-sm font-bold rounded-2xl hover:bg-black transition-colors"
+            >
+              <Upload size={16} /> Importar archivo
+            </button>
           </div>
         </section>
 
