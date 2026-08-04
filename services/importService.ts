@@ -517,7 +517,9 @@ export function buildTransactions(
   }
 
   // Las cuentas nuevas se crean en la moneda que predomina en sus filas y con
-  // saldo 0: el importador no toca saldos (ver nota en ImportModal).
+  // saldo 0; después la importación les aplica el impacto de sus movimientos
+  // (ver applyToBalances en services/balanceService.ts), así que terminan con
+  // el neto de lo importado.
   const newAccounts: Account[] = [...newAccountNames].map(name => {
     const usesUsd = rows.some(
       r => (r.account === name || r.destinationAccount === name) && r.currency === Currency.USD

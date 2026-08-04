@@ -22,6 +22,7 @@ import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
 import { sheetService, UnauthorizedError } from './services/sheetService';
+import { applyToBalances, type BalanceMovement } from './services/balanceService';
 import { authService } from './services/authService';
 import { ratesService } from './services/ratesService';
 import LoginScreen from './components/LoginScreen';
@@ -200,20 +201,19 @@ const App: React.FC = () => {
     let updatedTransactions = [...transactions];
     if (editingTransaction) {
       updatedTransactions = transactions.filter(t => t.id !== editingTransaction.id);
-      updateBalanceLocal(editingTransaction, true);
     }
 
     const transactionToSave = { ...newT, synced: false };
     updatedTransactions.push(transactionToSave);
-
     setTransactions(updatedTransactions);
-    updateBalanceLocal(newT, false);
 
     setIsFormOpen(false);
     setEditingTransaction(null);
     setIsSyncing(true);
 
     try {
+      // Al editar se revierte el movimiento anterior y se aplica el nuevo.
+      await applyBalances([newT], editingTransaction ? [editingTransaction] : []);
       await sheetService.saveTransaction(newT);
       setTransactions(prev => prev.map(t => t.id === newT.id ? { ...t, synced: true } : t));
       showSuccessToast();
@@ -284,11 +284,12 @@ const App: React.FC = () => {
     const t = transactions.find(tx => tx.id === id);
     if (!t) return;
 
-    updateBalanceLocal(t, true);
     setTransactions(prev => prev.filter(tx => tx.id !== id));
     setIsSyncing(true);
 
     try {
+      // Borrar un movimiento devuelve su impacto al saldo de la cuenta.
+      await applyBalances([], [t]);
       await sheetService.deleteTransaction(id);
     } catch (e) {
       console.error("Error eliminando transacción:", e);
@@ -310,10 +311,10 @@ const App: React.FC = () => {
   };
 
   /**
-   * Importación masiva desde .xlsx: primero crea las cuentas y categorías que
-   * el usuario decidió dar de alta, después guarda los movimientos en una sola
-   * llamada. Al terminar recarga los datos, porque el servidor es quien asigna
-   * los IDs definitivos de cada movimiento.
+   * Importación masiva desde .xlsx: da de alta las cuentas y categorías que el
+   * usuario decidió crear, ajusta los saldos con el impacto de los movimientos
+   * importados y los guarda en una sola llamada. Al terminar recarga los datos,
+   * porque el servidor es quien asigna los IDs definitivos.
    */
   const handleImport = async (
     imported: Omit<Transaction, 'id'>[],
@@ -322,9 +323,19 @@ const App: React.FC = () => {
   ): Promise<number> => {
     setIsSyncing(true);
     try {
-      if (newAccounts.length > 0) {
-        await Promise.all(newAccounts.map(acc => sheetService.saveAccount(acc)));
+      // Los movimientos importados impactan el saldo igual que los cargados a
+      // mano. Las cuentas nuevas arrancan en 0 y quedan con el neto importado.
+      const withNew = [...accounts, ...newAccounts];
+      const { accounts: finalAccounts, changed } = applyToBalances(
+        withNew, imported, usdRates.official, 1,
+      );
+
+      const isNew = (acc: Account) => newAccounts.some(n => n.id === acc.id);
+      const toSave = finalAccounts.filter(acc => isNew(acc) || changed.some(c => c.id === acc.id));
+      if (toSave.length > 0) {
+        await Promise.all(toSave.map(acc => sheetService.saveAccount(acc)));
       }
+
       if (newCategories.length > 0) {
         await sheetService.saveCategories([...categories, ...newCategories]);
       }
@@ -347,21 +358,30 @@ const App: React.FC = () => {
     }
   };
 
-  const updateBalanceLocal = (t: Transaction, reverse: boolean) => {
-    const m = reverse ? -1 : 1;
-    setAccounts(prev => prev.map(acc => {
-      if (acc.name === t.sourceAccount) {
-        let impact = 0;
-        if (t.type === TransactionType.EXPENSE) impact = -t.amount;
-        if (t.type === TransactionType.INCOME) impact = t.amount;
-        if (t.type === TransactionType.TRANSFER || t.type === TransactionType.INVESTMENT) impact = -t.amount;
-        return { ...acc, balance: acc.balance + (impact * m) };
-      }
-      if ((t.type === TransactionType.TRANSFER || t.type === TransactionType.INVESTMENT) && acc.name === t.destinationAccount) {
-        return { ...acc, balance: acc.balance + (t.amount * m) };
-      }
-      return acc;
-    }));
+  /**
+   * Aplica el impacto de unos movimientos sobre los saldos y **persiste** las
+   * cuentas afectadas. Antes esto solo tocaba el estado de React, así que los
+   * saldos volvían atrás en cuanto se recargaba la app.
+   *
+   * `remove` deshace movimientos (al borrar, o al reemplazar la versión previa
+   * de uno editado). Se resuelve todo en un solo cálculo para que editar no
+   * trabaje sobre saldos desactualizados.
+   */
+  const applyBalances = async (add: BalanceMovement[], remove: BalanceMovement[] = []) => {
+    if (add.length === 0 && remove.length === 0) return;
+
+    const rate = usdRates.official;
+    const afterRemove = applyToBalances(accounts, remove, rate, -1).accounts;
+    const finalAccounts = applyToBalances(afterRemove, add, rate, 1).accounts;
+
+    const changed = finalAccounts.filter(a => {
+      const before = accounts.find(o => o.id === a.id);
+      return before && before.balance !== a.balance;
+    });
+    if (changed.length === 0) return;
+
+    setAccounts(finalAccounts);
+    await Promise.all(changed.map(acc => sheetService.saveAccount(acc).catch(console.error)));
   };
 
   const navItems: { id: AppView; label: string; shortLabel: string; icon: typeof LayoutDashboard }[] = [

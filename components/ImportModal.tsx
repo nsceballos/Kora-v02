@@ -295,7 +295,8 @@ const ImportModal: React.FC<Props> = ({
               </div>
 
               <p className="text-[11px] text-slate-400 italic">
-                La importación no modifica los saldos de tus cuentas: son movimientos históricos.
+                Los movimientos importados ajustan el saldo de cada cuenta, igual que los cargados a mano.
+                Las cuentas nuevas arrancan en 0 y quedan con el neto de lo importado.
               </p>
             </div>
           )}

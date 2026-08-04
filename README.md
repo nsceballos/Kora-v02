@@ -140,7 +140,16 @@ Estos nombres de cuenta tampoco se ofrecen como "categorías nuevas" a crear. La
 ### Cuentas y categorías que no existen
 Antes de confirmar, Kora muestra un resumen y, **si alguna cuenta o categoría del archivo no existe todavía**, te deja elegir para cada una: crearla, reemplazarla por una existente, u omitir esas filas. Las cuentas nuevas se crean como *Débito* con saldo 0.
 
-> La importación **no modifica los saldos** de tus cuentas: se asume que son movimientos históricos y que el saldo actual ya los refleja.
+### Impacto en los saldos
+Los movimientos importados **ajustan el saldo de cada cuenta**, con el mismo criterio que los cargados a mano:
+
+| Tipo | Efecto |
+|---|---|
+| Gasto | Resta de la cuenta origen |
+| Ingreso | Suma a la cuenta origen |
+| Transferencia / Inversión | Resta del origen y suma al destino |
+
+Las cuentas creadas durante la importación arrancan en 0, así que quedan con el neto de lo importado. Si un movimiento viene en una moneda distinta a la de su cuenta, se convierte usando el dólar oficial (venta) del momento.
 
 ## Cierre mensual de gastos compartidos
 En la vista **Gastos Pareja**:
