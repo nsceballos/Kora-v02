@@ -158,9 +158,13 @@ Sirve cuando los saldos quedaron desincronizados de los movimientos, por ejemplo
 
 > El saldo resultante es exactamente el neto de los movimientos, así que un saldo inicial cargado a mano que no tenga movimientos que lo respalden se pierde.
 
-## Cierre mensual de gastos compartidos
+## Cierre de gastos compartidos
 En la vista **Gastos Pareja**:
 1. En **Ajustes → Gastos Compartidos** definí el nombre de la persona con quien compartís gastos (es solo una etiqueta para tus propios registros, no una cuenta).
-2. Ajustá el reparto de aportes con el control deslizante (predeterminado 50/50).
-3. Kora calcula cuánto le corresponde a cada uno y quién debe transferir a quién, usando únicamente tus propios movimientos marcados como compartidos.
-4. Con **"Cerrar el mes y saldar"** se marcan los gastos como saldados y se registra el cierre, visible luego en el historial.
+2. El panel **Período a saldar** muestra la fecha del **último cierre** (y cuánto se transfirió) y te deja elegir **hasta qué día** llega el nuevo cierre. Por defecto el corte es hoy.
+3. Se listan los gastos compartidos sin saldar con fecha hasta ese corte. Si hay movimientos posteriores al corte, se avisa cuántos quedan para el próximo cierre.
+4. Ajustá el reparto de aportes con el control deslizante (predeterminado 50/50).
+5. Kora calcula cuánto le corresponde a cada uno y quién debe transferir a quién, usando únicamente tus propios movimientos marcados como compartidos.
+6. Con **"Cerrar el mes y saldar"** se marcan como saldados **solo los movimientos del período** y se registra el cierre, fechado en la fecha de corte elegida (no en el día en que apretaste el botón), para que el próximo período arranque exactamente donde termina este.
+
+> Un gasto compartido cargado en forma retroactiva con fecha anterior al último cierre sigue apareciendo como pendiente hasta que se salde. Si se filtrara estrictamente por "posterior al último cierre", ese gasto no aparecería nunca en ningún cierre.
