@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, ArrowRight, Users } from 'lucide-react';
 import { Account, Transaction, formatCurrency, Currency, TransactionType } from '../types';
 import {
-  parseWorkbook, buildTransactions, ImportError,
+  parseWorkbook, analyzeRows, buildTransactions, ImportError,
   type ParseResult, type Resolution, type ResolutionMap,
 } from '../services/importService';
 
@@ -36,6 +36,7 @@ const ImportModal: React.FC<Props> = ({
   // Decisión tomada para cada cuenta/categoría desconocida.
   const [accountRes, setAccountRes] = useState<ResolutionMap>({});
   const [categoryRes, setCategoryRes] = useState<ResolutionMap>({});
+  const [detectTransfers, setDetectTransfers] = useState(true);
 
   const accountNames = useMemo(() => accounts.map(a => a.name), [accounts]);
 
@@ -44,11 +45,8 @@ const ImportModal: React.FC<Props> = ({
     setParsing(true);
     setFileName(file.name);
     try {
-      const parsed = await parseWorkbook(file, accountNames, categories);
+      const parsed = await parseWorkbook(file);
       setResult(parsed);
-      // Por defecto se crea todo lo que no existe; el usuario puede cambiarlo.
-      setAccountRes(Object.fromEntries(parsed.unknownAccounts.map(n => [n, { action: 'create' } as Resolution])));
-      setCategoryRes(Object.fromEntries(parsed.unknownCategories.map(n => [n, { action: 'create' } as Resolution])));
       setStep('resolve');
     } catch (e: any) {
       setError(e instanceof ImportError ? e.message : (e?.message || 'No se pudo procesar el archivo.'));
@@ -58,10 +56,28 @@ const ImportModal: React.FC<Props> = ({
     }
   };
 
-  const preview = useMemo(() => {
+  // Se recalcula al instante cuando cambia el toggle de transferencias.
+  const analysis = useMemo(() => {
     if (!result) return null;
-    return buildTransactions(result.rows, accountRes, categoryRes, currentUserName);
-  }, [result, accountRes, categoryRes, currentUserName]);
+    return analyzeRows(result.rawRows, accountNames, categories, detectTransfers);
+  }, [result, accountNames, categories, detectTransfers]);
+
+  // Los valores nuevos dependen del análisis, así que las decisiones por
+  // defecto ("crear") se reinician cuando ese conjunto cambia.
+  const unknownKey = analysis
+    ? `${analysis.unknownAccounts.join('|')}##${analysis.unknownCategories.join('|')}`
+    : '';
+  React.useEffect(() => {
+    if (!analysis) return;
+    setAccountRes(Object.fromEntries(analysis.unknownAccounts.map(n => [n, { action: 'create' } as Resolution])));
+    setCategoryRes(Object.fromEntries(analysis.unknownCategories.map(n => [n, { action: 'create' } as Resolution])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unknownKey]);
+
+  const preview = useMemo(() => {
+    if (!analysis) return null;
+    return buildTransactions(analysis.rows, accountRes, categoryRes, currentUserName);
+  }, [analysis, accountRes, categoryRes, currentUserName]);
 
   const summary = useMemo(() => {
     if (!preview) return null;
@@ -70,6 +86,7 @@ const ImportModal: React.FC<Props> = ({
       total: txs.length,
       income: txs.filter(t => t.type === TransactionType.INCOME).length,
       expense: txs.filter(t => t.type === TransactionType.EXPENSE).length,
+      transfer: txs.filter(t => t.type === TransactionType.TRANSFER).length,
       shared: txs.filter(t => t.isShared).length,
       usd: txs.filter(t => t.currency === Currency.USD).length,
     };
@@ -155,20 +172,46 @@ const ImportModal: React.FC<Props> = ({
           )}
 
           {/* ── Paso 2: resolver desconocidos + preview ── */}
-          {step === 'resolve' && result && preview && summary && (
+          {step === 'resolve' && analysis && preview && summary && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <StatBox label="A importar" value={summary.total} highlight />
                 <StatBox label="Gastos" value={summary.expense} />
                 <StatBox label="Ingresos" value={summary.income} />
-                <StatBox label="Compartidos" value={summary.shared} />
+                <StatBox label={summary.transfer > 0 ? 'Transferencias' : 'Compartidos'} value={summary.transfer > 0 ? summary.transfer : summary.shared} />
               </div>
 
-              {result.unknownAccounts.length > 0 && (
+              {/* Transferencias entre cuentas propias */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={detectTransfers}
+                    onChange={e => setDetectTransfers(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-indigo-600 rounded shrink-0"
+                  />
+                  <div>
+                    <p className="text-sm font-bold text-slate-800">Detectar transferencias entre cuentas</p>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Cuando la <b>Categoría</b> es el nombre de una cuenta, el movimiento se toma como
+                      una transferencia. Las dos filas espejadas (el gasto en una cuenta y el ingreso en
+                      la otra) se fusionan en un solo movimiento, para no inflar ingresos ni gastos.
+                    </p>
+                    {detectTransfers && analysis.transferCount > 0 && (
+                      <p className="text-[11px] font-bold text-indigo-600 mt-1.5">
+                        {analysis.transferCount} transferencia(s) detectada(s)
+                        {analysis.mergedCount > 0 && `, fusionando ${analysis.mergedCount * 2} filas del archivo`}
+                      </p>
+                    )}
+                  </div>
+                </label>
+              </div>
+
+              {analysis.unknownAccounts.length > 0 && (
                 <ResolutionSection
                   title="Cuentas que no existen"
                   subtitle="Elegí si crearlas o usar una cuenta que ya tenés."
-                  values={result.unknownAccounts}
+                  values={analysis.unknownAccounts}
                   options={accountNames}
                   resolutions={accountRes}
                   onChange={(name, res) => setAccountRes(prev => ({ ...prev, [name]: res }))}
@@ -176,27 +219,27 @@ const ImportModal: React.FC<Props> = ({
                 />
               )}
 
-              {result.unknownCategories.length > 0 && (
+              {analysis.unknownCategories.length > 0 && (
                 <ResolutionSection
                   title="Categorías que no existen"
                   subtitle="Elegí si crearlas o usar una categoría existente."
-                  values={result.unknownCategories}
+                  values={analysis.unknownCategories}
                   options={categories}
                   resolutions={categoryRes}
                   onChange={(name, res) => setCategoryRes(prev => ({ ...prev, [name]: res }))}
                 />
               )}
 
-              {result.errors.length > 0 && (
+              {result && result.errors.length > 0 && (
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
                   <p className="text-xs font-bold text-amber-700 flex items-center gap-2 mb-2">
-                    <AlertCircle size={14} /> {result.errors.length} fila(s) se van a omitir por errores
+                    <AlertCircle size={14} /> {result!.errors.length} fila(s) se van a omitir por errores
                   </p>
                   <ul className="text-[11px] text-amber-700/80 space-y-0.5 max-h-24 overflow-y-auto">
-                    {result.errors.slice(0, 8).map(e => (
+                    {result!.errors.slice(0, 8).map(e => (
                       <li key={e.rowNumber}>Fila {e.rowNumber}: {e.reason}</li>
                     ))}
-                    {result.errors.length > 8 && <li>...y {result.errors.length - 8} más</li>}
+                    {result!.errors.length > 8 && <li>...y {result!.errors.length - 8} más</li>}
                   </ul>
                 </div>
               )}
@@ -228,10 +271,15 @@ const ImportModal: React.FC<Props> = ({
                             <td className="px-3 py-2 font-bold text-slate-700">
                               {t.concept}
                               {t.isShared && <span className="ml-1.5 px-1.5 py-0.5 bg-rose-50 text-rose-600 rounded-full text-[9px] font-black uppercase">Compartido</span>}
+                              {t.type === TransactionType.TRANSFER && <span className="ml-1.5 px-1.5 py-0.5 bg-cyan-50 text-cyan-600 rounded-full text-[9px] font-black uppercase">Transferencia</span>}
                             </td>
-                            <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{t.sourceAccount}</td>
+                            <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
+                              {t.type === TransactionType.TRANSFER
+                                ? `${t.sourceAccount} → ${t.destinationAccount}`
+                                : t.sourceAccount}
+                            </td>
                             <td className={`px-3 py-2 text-right font-bold whitespace-nowrap ${t.type === TransactionType.INCOME ? 'text-emerald-600' : 'text-slate-700'}`}>
-                              {t.type === TransactionType.INCOME ? '+' : '-'}${formatCurrency(t.amount, t.currency)}
+                              {t.type === TransactionType.INCOME ? '+' : t.type === TransactionType.TRANSFER ? '' : '-'}${formatCurrency(t.amount, t.currency)}
                             </td>
                           </tr>
                         ))}

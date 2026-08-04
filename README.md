@@ -120,11 +120,24 @@ Desde **Ajustes → Importar movimientos**. El archivo se lee en el navegador (n
 | `Moneda` | `ARS` o `USD` (si se omite, se asume `ARS`) | No |
 
 Detalles del formato:
-- Los encabezados se reconocen sin distinguir mayúsculas ni acentos, y aceptan sinónimos (`Fecha`, `Cuenta`, `Rubro`, `Detalle`, `Tipo`, `Monto`, `Divisa`).
-- Las fechas pueden venir como fecha de Excel o como texto en formato argentino (`20/07/2026`) o ISO (`2026-07-20`).
+- Los encabezados se reconocen sin distinguir mayúsculas ni acentos, y aceptan sinónimos (`Fecha`, `Cuenta`, `Rubro`, `Detalle`, `Tipo`, `Monto`, `Divisa`). Si una columna aparece repetida, vale la primera.
+- Las fechas pueden venir como fecha de Excel o como texto en formato argentino (`20/07/2026`), con hora (`02/08/2026, 10:53:54`) o ISO (`2026-07-20`).
 - Los importes aceptan formato argentino (`45.300,50`) y símbolos (`$`). Siempre se toma el valor absoluto: el signo lo define la columna `Ingreso/Gasto`.
 - La marca `X` de gasto compartido debe estar sola o seguida de un espacio o signo de puntuación, para no confundir notas que simplemente empiezan con esa letra (`Xiaomi` no se marca como compartido). La `X` se quita del concepto final.
 
+### Transferencias entre cuentas propias
+Cuando movés plata entre dos cuentas tuyas, el archivo de origen lo registra como **dos filas espejadas**, usando la columna `Categoría` para nombrar la otra cuenta:
+
+| Período | Cuentas | Categoría | Ingreso/Gasto | Importe |
+|---|---|---|---|---|
+| 02/08/2026 | Santander | CocosCap | Ingreso | 100000 |
+| 02/08/2026 | CocosCap | Santander | Gastos | 100000 |
+
+Kora detecta que la `Categoría` es en realidad el nombre de una cuenta y **fusiona las dos filas en un único movimiento de tipo Transferencia** (de CocosCap a Santander). Importarlas tal cual generaría un ingreso y un gasto falsos de $100.000 cada uno, inflando ambas estadísticas; como transferencia, el Dashboard las excluye correctamente del cálculo de ingresos y gastos.
+
+Estos nombres de cuenta tampoco se ofrecen como "categorías nuevas" a crear. La detección se puede desactivar con una casilla en el importador, por si alguna categoría real coincide con el nombre de una cuenta.
+
+### Cuentas y categorías que no existen
 Antes de confirmar, Kora muestra un resumen y, **si alguna cuenta o categoría del archivo no existe todavía**, te deja elegir para cada una: crearla, reemplazarla por una existente, u omitir esas filas. Las cuentas nuevas se crean como *Débito* con saldo 0.
 
 > La importación **no modifica los saldos** de tus cuentas: se asume que son movimientos históricos y que el saldo actual ya los refleja.
