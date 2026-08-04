@@ -13,7 +13,7 @@ import {
   AlertCircle,
   LogOut,
 } from 'lucide-react';
-import { Transaction, TransactionType, Account, Currency, Budget, AuthUser, Settlement, DEFAULT_SPLIT } from './types';
+import { Transaction, TransactionType, Account, Currency, Budget, AuthUser, Settlement, DEFAULT_SPLIT, UsdRates } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionsList from './components/TransactionsList';
 import AccountsManager from './components/AccountsManager';
@@ -23,6 +23,7 @@ import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
 import { sheetService, UnauthorizedError } from './services/sheetService';
 import { authService } from './services/authService';
+import { ratesService } from './services/ratesService';
 import LoginScreen from './components/LoginScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
@@ -48,7 +49,8 @@ const App: React.FC = () => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [partnerName, setPartnerName] = useState<string>('Pareja');
   const [myPercent, setMyPercent] = useState<number>(DEFAULT_SPLIT);
-  const [usdRates, setUsdRates] = useState({ blue: 1240, official: 980 });
+  const [usdRates, setUsdRates] = useState<UsdRates>(() => ratesService.getCached());
+  const [ratesLoading, setRatesLoading] = useState(false);
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('');
 
   // ── App Phase & Auth ────────────────────────────────────────
@@ -129,12 +131,25 @@ const App: React.FC = () => {
   const [showToast, setShowToast] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  /** Trae la cotización del dólar de la API pública (ver services/ratesService.ts). */
+  const refreshRates = useCallback(async (force = false) => {
+    setRatesLoading(true);
+    try {
+      setUsdRates(await ratesService.load(force));
+    } finally {
+      setRatesLoading(false);
+    }
+  }, []);
+
   const init = useCallback(async () => {
     try {
       setIsSyncing(true);
       setSyncError(null);
 
       sheetService.flushQueue().catch(console.error);
+
+      // No bloquea la carga de datos: actualiza la cotización en paralelo.
+      refreshRates().catch(console.error);
 
       const data = await sheetService.getAppData();
 
@@ -150,9 +165,6 @@ const App: React.FC = () => {
           if (!Number.isNaN(parsed)) setMyPercent(parsed);
         }
       }
-
-      const savedRates = localStorage.getItem('finance_arch_rates');
-      if (savedRates) setUsdRates(JSON.parse(savedRates));
 
       const savedWebhook = localStorage.getItem('finance_arch_n8n_webhook');
       if (savedWebhook) setN8nWebhookUrl(savedWebhook);
@@ -173,7 +185,7 @@ const App: React.FC = () => {
       setIsLoading(false);
       setIsSyncing(false);
     }
-  }, []);
+  }, [refreshRates]);
 
   useEffect(() => { if (phase === 'app' && currentUser) init(); }, [phase, currentUser, init]);
 
@@ -453,7 +465,7 @@ const App: React.FC = () => {
               <Settings
                 categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)}
                 budgets={budgets} setBudgets={handleUpdateBudgets}
-                usdRates={usdRates} onUpdateRates={setUsdRates}
+                usdRates={usdRates} onRefreshRates={() => refreshRates(true)} ratesLoading={ratesLoading}
                 n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl}
                 currentUser={currentUser}
                 onUpdateName={handleUpdateName}
