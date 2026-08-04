@@ -3,9 +3,10 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 /**
- * Dev-only middleware that serves POST /api/sheets locally, mirroring the
- * Vercel serverless function so `npm run dev` behaves like production.
- * In production Vercel runs api/sheets.ts directly and this plugin is unused.
+ * Dev-only middleware that serves POST /api/sheets and POST /api/auth
+ * locally, mirroring the Vercel serverless functions so `npm run dev`
+ * behaves like production. In production Vercel runs api/sheets.ts and
+ * api/auth.ts directly and this plugin is unused.
  */
 function devApiPlugin(): Plugin {
   return {
@@ -22,16 +23,39 @@ function devApiPlugin(): Plugin {
           let raw = '';
           for await (const chunk of req) raw += chunk;
           const payload = raw ? JSON.parse(raw) : {};
-
-          const tokenHeader = req.headers['x-kora-token'];
-          const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+          const authHeader = req.headers['authorization'];
 
           // Imported lazily so a missing google-auth-library never breaks dev startup.
           const { handleRequest } = await import('./api/_handler');
           const { status, body } = await handleRequest({
             action: payload.action,
             data: payload.data,
-            token: token ?? null,
+            authHeader: Array.isArray(authHeader) ? authHeader[0] : authHeader ?? null,
+          });
+          res.statusCode = status;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(body));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'DEV_API_ERROR', message: e?.message }));
+        }
+      });
+
+      server.middlewares.use('/api/auth', async (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: 'METHOD_NOT_ALLOWED' }));
+          return;
+        }
+        try {
+          let raw = '';
+          for await (const chunk of req) raw += chunk;
+          const payload = raw ? JSON.parse(raw) : {};
+
+          const { handleAuthRequest } = await import('./api/_authHandler');
+          const { status, body } = await handleAuthRequest({
+            action: payload.action,
+            data: payload.data,
           });
           res.statusCode = status;
           res.setHeader('Content-Type', 'application/json');

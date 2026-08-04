@@ -1,11 +1,15 @@
-import { Transaction, Account, AppData, Budget, UserConfig, DEFAULT_USERS, Settlement } from '../types';
+import { Transaction, Account, AppData, Budget, Settlement } from '../types';
+import { authService } from './authService';
 
 /**
  * Kora Sheet Service - Unified data access layer
  *
  * All persistence goes through the serverless endpoint `/api/sheets`, which is
  * backed by a Google service account configured via Vercel environment
- * variables. The browser never holds Google credentials.
+ * variables. The browser never holds Google credentials. Every request
+ * carries the user's session token (`Authorization: Bearer <token>`), and the
+ * server uses it to scope every read/write to that user only — see
+ * api/_handler.ts and api/_sheetsCore.ts.
  *
  * Layers:
  * 1. POST /api/sheets  (source of truth)
@@ -14,18 +18,11 @@ import { Transaction, Account, AppData, Budget, UserConfig, DEFAULT_USERS, Settl
  */
 
 const API_URL = '/api/sheets';
-const ACCESS_TOKEN_KEY = 'kora_access_token';
 
-/** Raised when the server requires an access token the client hasn't provided. */
+/** Raised when the session token is missing, invalid or expired — caller should log out. */
 export class UnauthorizedError extends Error {
   constructor() { super('UNAUTHORIZED'); this.name = 'UnauthorizedError'; }
 }
-
-export const accessToken = {
-  get: () => localStorage.getItem(ACCESS_TOKEN_KEY) || '',
-  set: (t: string) => localStorage.setItem(ACCESS_TOKEN_KEY, t.trim()),
-  clear: () => localStorage.removeItem(ACCESS_TOKEN_KEY),
-};
 
 // ── Offline queue ───────────────────────────────────────────────
 
@@ -44,34 +41,31 @@ const addToQueue = (action: string, data: any) => {
 // ── API runner ──────────────────────────────────────────────────
 
 /**
- * Call the serverless API. Read actions (`getAppData`, `getUsers`) return null
- * on failure so callers fall back to cache. Write actions get queued for retry
- * when the network fails, but surface UnauthorizedError immediately.
+ * Call the serverless API. Read actions (`getAppData`) return null on
+ * network failure so callers fall back to cache. Write actions get queued
+ * for retry only on network/transient (5xx) failures. A deterministic
+ * rejection from the server (validation error, 403, wrong password, etc.)
+ * throws immediately and is never queued/retried, since retrying it would
+ * just repeat the same failure.
  */
 async function apiAction(action: string, data?: any, retries = 2): Promise<any> {
-  const isRead = action === 'getAppData' || action === 'getUsers';
+  const isRead = action === 'getAppData';
+  const token = authService.getToken();
+  if (!token) throw new UnauthorizedError();
 
   for (let i = 0; i <= retries; i++) {
+    let response: Response;
     try {
-      const token = accessToken.get();
-      const response = await fetch(API_URL, {
+      response = await fetch(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { 'x-kora-token': token } : {}),
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ action, data }),
       });
-
-      if (response.status === 401) throw new UnauthorizedError();
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const result = await response.json();
-      if (result && result.error) throw new Error(result.error);
-      return result;
-    } catch (e) {
-      if (e instanceof UnauthorizedError) throw e;
-
+    } catch {
+      // Network failure — retry, then fall back to cache/queue.
       if (i === retries) {
         if (!isRead) {
           addToQueue(action, data);
@@ -80,7 +74,29 @@ async function apiAction(action: string, data?: any, retries = 2): Promise<any> 
         return null;
       }
       await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+      continue;
     }
+
+    if (response.status === 401) throw new UnauthorizedError();
+
+    if (response.status >= 500) {
+      // Transient server-side failure — retry, then fall back to cache/queue.
+      if (i === retries) {
+        if (!isRead) {
+          addToQueue(action, data);
+          return { success: true, queued: true };
+        }
+        return null;
+      }
+      await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+      continue;
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result?.error) {
+      throw new Error(result?.error || `HTTP ${response.status}`);
+    }
+    return result;
   }
   return null;
 }
@@ -189,50 +205,15 @@ export const sheetService = {
     return !!res;
   },
 
-  async getUsers(): Promise<UserConfig[]> {
-    const VALID_COLORS = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
-    let result: any[] | null = null;
-    try {
-      result = await apiAction('getUsers');
-    } catch (e) {
-      if (e instanceof UnauthorizedError) throw e;
-    }
-
-    if (Array.isArray(result) && result.length > 0) {
-      const users: UserConfig[] = result
-        .filter((u: any) => u && typeof u.id === 'string' && typeof u.name === 'string' && u.name)
-        .map((u: any): UserConfig => ({
-          id: String(u.id),
-          name: String(u.name),
-          email: String(u.email || ''),
-          avatar: String(u.avatar || ''),
-          color: (VALID_COLORS.includes(u.color) ? u.color : 'indigo') as UserConfig['color'],
-          pin: String(u.pin || ''),
-          registeredAt: u.registeredAt || '',
-        }));
-      if (users.length > 0) {
-        localStorage.setItem('kora_users_config', JSON.stringify(users));
-        return users;
-      }
-    }
-
-    try {
-      const stored = localStorage.getItem('kora_users_config');
-      if (stored) {
-        const parsed: UserConfig[] = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return DEFAULT_USERS;
+  /** Devuelve el usuario público actualizado (o null si falló) para refrescar la sesión local. */
+  async updateProfile(name: string): Promise<{ id: string; name: string; email: string; color: string } | null> {
+    const res = await apiAction('updateProfile', { name });
+    return res?.user ?? null;
   },
 
-  async saveUser(user: UserConfig): Promise<boolean> {
-    const res = await apiAction('saveUser', user);
-    return !!res;
-  },
-
-  async deleteUser(id: string): Promise<boolean> {
-    const res = await apiAction('deleteUser', { id });
-    return !!res;
+  /** Lanza un Error (ej. "INVALID_PASSWORD") si la contraseña actual es incorrecta. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
+    const res = await apiAction('changePassword', { currentPassword, newPassword });
+    return !!res?.success;
   },
 };

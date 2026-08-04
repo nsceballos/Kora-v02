@@ -9,8 +9,10 @@
  *   GOOGLE_SERVICE_ACCOUNT_EMAIL  - client_email of the service account
  *   GOOGLE_PRIVATE_KEY            - private_key (with real or escaped \n)
  *   GOOGLE_SHEET_ID              - target spreadsheet id (GOOGLE_SPREADSHEET_ID also accepted)
- * Optional:
- *   KORA_ACCESS_TOKEN            - if set, the API requires this shared token
+ *
+ * This service account is shared by every user of the app — it only grants
+ * access to the one spreadsheet. Per-user data isolation is enforced one
+ * layer up (see api/_auth.ts and api/_sheetsCore.ts), not by this module.
  */
 
 import { JWT } from 'google-auth-library';
@@ -23,11 +25,6 @@ export function getSpreadsheetId(): string {
   const id = process.env.GOOGLE_SHEET_ID || process.env.GOOGLE_SPREADSHEET_ID;
   if (!id) throw new Error('MISSING_SPREADSHEET_ID');
   return id;
-}
-
-export function getAccessGate(): string | null {
-  const token = process.env.KORA_ACCESS_TOKEN;
-  return token && token.trim() ? token.trim() : null;
 }
 
 function buildClient(): JWT {

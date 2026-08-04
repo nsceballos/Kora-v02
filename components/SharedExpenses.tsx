@@ -1,16 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Transaction, formatCurrency, Currency, Settlement, SplitPercents, UserConfig, DEFAULT_SPLIT } from '../types';
+import { Transaction, formatCurrency, Currency, Settlement, AuthUser, DEFAULT_SPLIT } from '../types';
 import { Users, ArrowRightLeft, CheckCircle2, History, Percent, CalendarCheck, X, Scale, Info } from 'lucide-react';
 
 interface Props {
   transactions: Transaction[];
   usdRate: number;
   onSettle: (settlement: Settlement) => void;
-  currentUser: UserConfig;
-  partner: UserConfig | null;
+  currentUser: AuthUser;
+  /** Nombre de la persona con quien se comparten gastos. Es solo una etiqueta
+   *  personal (no una cuenta real) — este resumen nunca es visible para nadie
+   *  más que el usuario dueño de estos datos. */
+  partnerName: string;
   settlements: Settlement[];
-  splitPercents: SplitPercents;
-  onUpdateSplit: (percents: SplitPercents) => void;
+  myPercent: number;
+  onUpdateSplit: (percent: number) => void;
 }
 
 const monthLabel = (isoDate: string): string => {
@@ -22,23 +25,19 @@ const monthLabel = (isoDate: string): string => {
 
 const SharedExpenses: React.FC<Props> = ({
   transactions, usdRate, onSettle,
-  currentUser, partner,
-  settlements, splitPercents, onUpdateSplit,
+  currentUser, partnerName,
+  settlements, myPercent: savedMyPercent, onUpdateSplit,
 }) => {
-  const partnerName = partner?.name ?? 'Pareja';
   const toArs = (amount: number, currency: Currency) =>
     currency === Currency.USD ? amount * usdRate : amount;
 
   // ── Reparto (% de aporte) ─────────────────────────────────────
-  const savedMyPercent = splitPercents[currentUser.id] ?? DEFAULT_SPLIT;
-  const [myPercent, setMyPercent] = useState(savedMyPercent);
-  useEffect(() => { setMyPercent(savedMyPercent); }, [savedMyPercent]);
+  const [myPercent, setMyPercent] = useState(savedMyPercent ?? DEFAULT_SPLIT);
+  useEffect(() => { setMyPercent(savedMyPercent ?? DEFAULT_SPLIT); }, [savedMyPercent]);
   const partnerPercent = 100 - myPercent;
 
   const commitSplit = (value: number) => {
-    const percents: SplitPercents = { [currentUser.id]: value };
-    if (partner) percents[partner.id] = 100 - value;
-    onUpdateSplit(percents);
+    onUpdateSplit(value);
   };
 
   // ── Cálculo de saldos pendientes ──────────────────────────────

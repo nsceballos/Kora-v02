@@ -3,7 +3,8 @@
  *
  * Single action-based endpoint backed by a Google service account.
  * Body: { action: string, data?: any }
- * Auth: optional shared token via the "x-kora-token" header (see KORA_ACCESS_TOKEN).
+ * Auth: requiere `Authorization: Bearer <token>` (token de sesión emitido por
+ * POST /api/auth al registrarse o iniciar sesión). Sin token válido, 401.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -22,13 +23,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   payload = payload || {};
 
-  const tokenHeader = req.headers['x-kora-token'];
-  const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+  const authHeader = req.headers['authorization'];
 
   const { status, body } = await handleRequest({
     action: payload.action,
     data: payload.data,
-    token: token ?? null,
+    authHeader: Array.isArray(authHeader) ? authHeader[0] : authHeader ?? null,
   });
 
   res.status(status).json(body);

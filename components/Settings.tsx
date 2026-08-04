@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, Plus, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, Users as UsersIcon, UserPlus, Trash2 } from 'lucide-react';
-import { Budget, UserConfig, USER_COLORS } from '../types';
+import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2 } from 'lucide-react';
+import { Budget, AuthUser } from '../types';
 
 interface Props {
   categories: string[];
@@ -11,38 +11,35 @@ interface Props {
   onUpdateRates: (rates: { blue: number; official: number }) => void;
   n8nWebhookUrl: string;
   onUpdateWebhookUrl: (url: string) => void;
-  users: UserConfig[];
-  onUpdateUsers: (users: UserConfig[]) => void;
-  currentUserId: string;
+  currentUser: AuthUser;
+  onUpdateName: (name: string) => Promise<void>;
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  partnerName: string;
+  onUpdatePartnerName: (name: string) => void;
 }
-
-const COLOR_BG: Record<UserConfig['color'], string> = {
-  indigo: 'bg-indigo-500', rose: 'bg-rose-500', emerald: 'bg-emerald-500',
-  amber: 'bg-amber-500', cyan: 'bg-cyan-500', purple: 'bg-purple-500',
-};
-const COLOR_RING: Record<UserConfig['color'], string> = {
-  indigo: 'ring-indigo-500', rose: 'ring-rose-500', emerald: 'ring-emerald-500',
-  amber: 'ring-amber-500', cyan: 'ring-cyan-500', purple: 'ring-purple-500',
-};
 
 const Settings: React.FC<Props> = ({
   categories, setCategories,
   budgets, setBudgets,
   usdRates, onUpdateRates,
   n8nWebhookUrl, onUpdateWebhookUrl,
-  users, onUpdateUsers,
-  currentUserId,
+  currentUser, onUpdateName, onChangePassword,
+  partnerName, onUpdatePartnerName,
 }) => {
   const [newCat, setNewCat] = useState('');
   const [localRates, setLocalRates] = useState(usdRates);
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
   const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
-  const [localUsers, setLocalUsers] = useState<UserConfig[]>(users);
+  const [localPartnerName, setLocalPartnerName] = useState(partnerName);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     setLocalBudgets(budgets);
   }, [budgets]);
+
+  useEffect(() => {
+    setLocalPartnerName(partnerName);
+  }, [partnerName]);
 
   const addCategory = () => {
     if (newCat && !categories.includes(newCat)) {
@@ -71,29 +68,9 @@ const Settings: React.FC<Props> = ({
     onUpdateRates(localRates);
     onUpdateWebhookUrl(localWebhook);
     setBudgets(localBudgets);
-    onUpdateUsers(localUsers);
+    if (localPartnerName !== partnerName) onUpdatePartnerName(localPartnerName);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
-  };
-
-  const updateUser = (id: string, patch: Partial<UserConfig>) => {
-    setLocalUsers(prev => prev.map(u => u.id === id ? { ...u, ...patch } : u));
-  };
-
-  const addUser = () => {
-    const newUser: UserConfig = {
-      id: crypto.randomUUID(),
-      name: '',
-      email: '',
-      avatar: '',
-      pin: '',
-      color: USER_COLORS[localUsers.length % USER_COLORS.length],
-    };
-    setLocalUsers(prev => [...prev, newUser]);
-  };
-
-  const removeUser = (id: string) => {
-    setLocalUsers(prev => prev.filter(u => u.id !== id));
   };
 
   return (
@@ -115,6 +92,28 @@ const Settings: React.FC<Props> = ({
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10">
+        <AccountSection currentUser={currentUser} onUpdateName={onUpdateName} onChangePassword={onChangePassword} />
+
+        <section className="space-y-6">
+          <SectionHeader icon={Heart} title="Gastos Compartidos" color="rose" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-3">
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+              Nombre de la persona con quien compartís gastos
+            </label>
+            <input
+              type="text"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 outline-none text-sm"
+              value={localPartnerName}
+              onChange={e => setLocalPartnerName(e.target.value)}
+              placeholder="Ej: Mi pareja"
+            />
+            <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+              Es solo una etiqueta para tus propios registros de "Gastos Compartidos" — no crea ni vincula
+              ninguna otra cuenta. Esta información es privada: solo vos podés verla.
+            </p>
+          </div>
+        </section>
+
         <section className="space-y-6">
           <SectionHeader icon={Database} title="Google Sheets" color="emerald" />
           <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-3">
@@ -123,15 +122,13 @@ const Settings: React.FC<Props> = ({
               <p className="text-sm font-bold text-slate-700">Conectado vía cuenta de servicio</p>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Los datos se guardan en tu hoja de cálculo a través de una cuenta de servicio de Google.
-              Las credenciales se configuran como variables de entorno en el servidor (Vercel):
+              Tus datos se guardan en una hoja de cálculo compartida, pero cada fila queda marcada con tu
+              usuario: nadie más puede leerlos ni modificarlos, ni siquiera con acceso directo a la hoja
+              sin pasar por esta app. Las credenciales de Google se configuran como variables de entorno
+              en el servidor (Vercel):
               <span className="font-mono text-slate-500"> GOOGLE_SERVICE_ACCOUNT_EMAIL</span>,
               <span className="font-mono text-slate-500"> GOOGLE_PRIVATE_KEY</span> y
               <span className="font-mono text-slate-500"> GOOGLE_SHEET_ID</span>.
-              No hay nada que configurar desde la app.
-            </p>
-            <p className="text-[10px] text-slate-400 italic flex items-center gap-1 pt-1">
-              <AlertCircle size={10} /> Recordá compartir la hoja con el email de la cuenta de servicio (como Editor).
             </p>
           </div>
         </section>
@@ -141,7 +138,7 @@ const Settings: React.FC<Props> = ({
           <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">n8n Webhook URL</label>
-              <input 
+              <input
                 type="text"
                 placeholder="https://primary-production.n8n.cloud/webhook/..."
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xs"
@@ -168,7 +165,7 @@ const Settings: React.FC<Props> = ({
                 <span className="text-xs font-bold text-slate-700">{cat}</span>
                 <div className="relative w-32">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">$</span>
-                  <input 
+                  <input
                     type="number"
                     className="w-full pl-6 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-rose-500"
                     value={localBudgets.find(b => b.category === cat)?.limit || 0}
@@ -180,107 +177,13 @@ const Settings: React.FC<Props> = ({
           </div>
         </section>
 
-        {/* ── Usuarios ── */}
-        <section className="space-y-6 lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-                <UsersIcon size={20} />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-800">Usuarios</h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sincronizado con Google Sheets</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={addUser}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700 transition-colors"
-            >
-              <UserPlus size={14} /> Añadir usuario
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {localUsers.map((user, i) => {
-              const isCurrentUser = user.id === currentUserId;
-              const isOnlyUser = localUsers.length === 1;
-              return (
-                <div key={user.id} className={`bg-white p-6 rounded-3xl border shadow-sm space-y-4 ${isCurrentUser ? 'border-indigo-200 ring-1 ring-indigo-200' : 'border-slate-100'}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl ${COLOR_BG[user.color]} flex items-center justify-center text-white font-black text-lg`}>
-                        {user.name[0]?.toUpperCase() || '?'}
-                      </div>
-                      <div>
-                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Usuario {i + 1}</span>
-                        {isCurrentUser && (
-                          <span className="ml-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-black uppercase rounded-full">Tú</span>
-                        )}
-                      </div>
-                    </div>
-                    {!isCurrentUser && !isOnlyUser && (
-                      <button
-                        type="button"
-                        onClick={() => removeUser(user.id)}
-                        className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                        title="Eliminar usuario"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Nombre</label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={user.name}
-                      onChange={e => updateUser(user.id, { name: e.target.value })}
-                      placeholder="Tu nombre"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">PIN (4 dígitos, opcional)</label>
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={4}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono tracking-[0.4em] focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={user.pin}
-                      onChange={e => updateUser(user.id, { pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
-                      placeholder="Sin PIN"
-                    />
-                    <p className="mt-1 text-[10px] text-slate-400 italic">Si está vacío, no se requiere PIN para ingresar.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Color del perfil</label>
-                    <div className="flex gap-2">
-                      {USER_COLORS.map(c => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => updateUser(user.id, { color: c })}
-                          className={`w-7 h-7 rounded-full ${COLOR_BG[c]} transition-all ${user.color === c ? `ring-2 ring-offset-2 ${COLOR_RING[c]} scale-110` : 'opacity-50 hover:opacity-80'}`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
         <section className="space-y-6 lg:col-span-2">
           <SectionHeader icon={Tags} title="Gestión de Categorías" color="slate" />
           <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
             <div className="flex gap-4 mb-8">
-              <input 
-                type="text" 
-                placeholder="Nueva categoría..." 
+              <input
+                type="text"
+                placeholder="Nueva categoría..."
                 className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-slate-400"
                 value={newCat}
                 onChange={e => setNewCat(e.target.value)}
@@ -299,6 +202,138 @@ const Settings: React.FC<Props> = ({
         </section>
       </div>
     </div>
+  );
+};
+
+interface AccountSectionProps {
+  currentUser: AuthUser;
+  onUpdateName: (name: string) => Promise<void>;
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+}
+
+const AccountSection: React.FC<AccountSectionProps> = ({ currentUser, onUpdateName, onChangePassword }) => {
+  const [name, setName] = useState(currentUser.name);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSaved, setPwSaved] = useState(false);
+  const [pwSaving, setPwSaving] = useState(false);
+
+  useEffect(() => setName(currentUser.name), [currentUser.name]);
+
+  const handleSaveName = async () => {
+    if (!name.trim() || name.trim() === currentUser.name) return;
+    setNameSaving(true);
+    try {
+      await onUpdateName(name.trim());
+      setNameSaved(true);
+      setTimeout(() => setNameSaved(false), 2500);
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+
+    if (newPassword.length < 6) return setPwError('La nueva contraseña debe tener al menos 6 caracteres.');
+    if (newPassword !== confirmPassword) return setPwError('Las contraseñas no coinciden.');
+
+    setPwSaving(true);
+    try {
+      await onChangePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPwSaved(true);
+      setTimeout(() => setPwSaved(false), 2500);
+    } catch (err: any) {
+      setPwError(err?.message === 'INVALID_PASSWORD' ? 'La contraseña actual es incorrecta.' : (err?.message || 'No se pudo cambiar la contraseña.'));
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  return (
+    <section className="space-y-6">
+      <SectionHeader icon={UserCircle} title="Mi Cuenta" color="indigo" />
+      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+        <div>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Email</label>
+          <p className="text-sm text-slate-500 px-1">{currentUser.email}</p>
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Nombre</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={handleSaveName}
+              disabled={nameSaving || !name.trim() || name.trim() === currentUser.name}
+              className={`px-4 rounded-xl text-xs font-bold transition-colors disabled:opacity-40 ${nameSaved ? 'bg-emerald-500 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+            >
+              {nameSaving ? <Loader2 size={14} className="animate-spin" /> : nameSaved ? <CheckCircle2 size={14} /> : 'Guardar'}
+            </button>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-2 mb-3">
+            <KeyRound size={14} className="text-slate-400" />
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Cambiar contraseña</label>
+          </div>
+          <form onSubmit={handleChangePassword} className="space-y-3">
+            <input
+              type="password"
+              placeholder="Contraseña actual"
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Nueva contraseña"
+              minLength={6}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Repetir nueva contraseña"
+              minLength={6}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              required
+            />
+            {pwError && (
+              <p className="flex items-center gap-1.5 text-rose-500 text-xs font-bold"><AlertCircle size={12} /> {pwError}</p>
+            )}
+            <button
+              type="submit"
+              disabled={pwSaving}
+              className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 ${pwSaved ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-white hover:bg-black'}`}
+            >
+              {pwSaving ? <Loader2 size={14} className="animate-spin mx-auto" /> : pwSaved ? 'Contraseña actualizada' : 'Actualizar contraseña'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
   );
 };
 
@@ -336,7 +371,7 @@ const RateField: React.FC<RateFieldProps> = ({ label, value, onChange }) => (
     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</label>
     <div className="relative">
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-      <input 
+      <input
         type="number"
         className="w-full pl-6 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm"
         value={value}
