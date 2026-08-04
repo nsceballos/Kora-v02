@@ -126,9 +126,12 @@ export const sheetService = {
 
     if (result && Array.isArray(result.transactions) && Array.isArray(result.accounts)) {
       const data: AppData = {
-        transactions: result.transactions.filter((t: any) =>
-          t && typeof t.id === 'string' && typeof t.amount === 'number' && t.type
-        ),
+        // Lo que vuelve del servidor ya está guardado en la hoja: se marca como
+        // sincronizado para que la UI no lo muestre como "Sync pendiente"
+        // (la hoja no tiene columna `synced`, así que llega siempre indefinido).
+        transactions: result.transactions
+          .filter((t: any) => t && typeof t.id === 'string' && typeof t.amount === 'number' && t.type)
+          .map((t: any) => ({ ...t, synced: true })),
         accounts: result.accounts.filter((a: any) =>
           a && typeof a.id === 'string' && typeof a.balance === 'number'
         ),
