@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { hashPassword, comparePassword } from './_auth';
+import { hashPassword, comparePassword } from './_auth.js';
 
 export const SHEET_NAMES = {
   TRANSACTIONS: 'Transacciones',

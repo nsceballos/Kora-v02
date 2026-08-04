@@ -11,9 +11,9 @@
  * action that can read or write another user's rows.
  */
 
-import { createSheetsClient, handleAction } from './_sheetsCore';
-import { getServiceAccountToken, getSpreadsheetId } from './_serviceAccount';
-import { getUserIdFromAuthHeader } from './_auth';
+import { createSheetsClient, handleAction } from './_sheetsCore.js';
+import { getServiceAccountToken, getSpreadsheetId } from './_serviceAccount.js';
+import { getUserIdFromAuthHeader } from './_auth.js';
 
 export interface HandlerRequest {
   action?: string;
