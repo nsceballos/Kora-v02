@@ -63,6 +63,18 @@ export interface Budget {
   limit: number;
 }
 
+/**
+ * Cotización del dólar (valor de venta, en ARS). Se obtiene automáticamente
+ * de una API pública; `updatedAt` vacío significa que todavía no se pudo
+ * traer ninguna cotización real y se están usando los valores de respaldo.
+ */
+export interface UsdRates {
+  official: number;
+  blue: number;
+  /** Timestamp ISO de la última actualización exitosa ('' si nunca se actualizó). */
+  updatedAt: string;
+}
+
 /** Registro de un cierre mensual de gastos compartidos */
 export interface Settlement {
   id: string;

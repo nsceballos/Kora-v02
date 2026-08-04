@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2 } from 'lucide-react';
-import { Budget, AuthUser } from '../types';
+import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2, RefreshCw } from 'lucide-react';
+import { Budget, AuthUser, UsdRates } from '../types';
 
 interface Props {
   categories: string[];
   setCategories: (cats: string[]) => void;
   budgets: Budget[];
   setBudgets: (budgets: Budget[]) => void;
-  usdRates: { blue: number; official: number };
-  onUpdateRates: (rates: { blue: number; official: number }) => void;
+  usdRates: UsdRates;
+  onRefreshRates: () => void;
+  ratesLoading: boolean;
   n8nWebhookUrl: string;
   onUpdateWebhookUrl: (url: string) => void;
   currentUser: AuthUser;
@@ -21,13 +22,12 @@ interface Props {
 const Settings: React.FC<Props> = ({
   categories, setCategories,
   budgets, setBudgets,
-  usdRates, onUpdateRates,
+  usdRates, onRefreshRates, ratesLoading,
   n8nWebhookUrl, onUpdateWebhookUrl,
   currentUser, onUpdateName, onChangePassword,
   partnerName, onUpdatePartnerName,
 }) => {
   const [newCat, setNewCat] = useState('');
-  const [localRates, setLocalRates] = useState(usdRates);
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
   const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
   const [localPartnerName, setLocalPartnerName] = useState(partnerName);
@@ -65,7 +65,6 @@ const Settings: React.FC<Props> = ({
   };
 
   const handleSaveAll = () => {
-    onUpdateRates(localRates);
     onUpdateWebhookUrl(localWebhook);
     setBudgets(localBudgets);
     if (localPartnerName !== partnerName) onUpdatePartnerName(localPartnerName);
@@ -151,9 +150,36 @@ const Settings: React.FC<Props> = ({
 
         <section className="space-y-6">
           <SectionHeader icon={DollarSign} title="Tipos de Cambio" color="cyan" />
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm grid grid-cols-2 gap-4">
-            <RateField label="Oficial" value={localRates.official} onChange={v => setLocalRates({...localRates, official: v})} />
-            <RateField label="Blue" value={localRates.blue} onChange={v => setLocalRates({...localRates, blue: v})} />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <RateCard label="Oficial" value={usdRates.official} />
+              <RateCard label="Blue" value={usdRates.blue} />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              {usdRates.updatedAt ? (
+                <p className="text-[11px] text-slate-400">
+                  Actualizado {formatUpdatedAt(usdRates.updatedAt)}
+                </p>
+              ) : (
+                <p className="text-[11px] text-amber-600 flex items-center gap-1.5 font-bold">
+                  <AlertCircle size={12} /> Sin conexión con la API — valores de respaldo
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={onRefreshRates}
+                disabled={ratesLoading}
+                className="flex items-center gap-1.5 px-3 py-2 bg-cyan-50 text-cyan-700 text-[11px] font-bold rounded-xl hover:bg-cyan-100 transition-colors disabled:opacity-50 shrink-0"
+              >
+                <RefreshCw size={12} className={ratesLoading ? 'animate-spin' : ''} />
+                Actualizar
+              </button>
+            </div>
+
+            <p className="text-[10px] text-slate-400 italic">
+              Cotización de venta, obtenida automáticamente de dolarapi.com. Se actualiza al abrir la app.
+            </p>
           </div>
         </section>
 
@@ -360,24 +386,25 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ icon: Icon, title, color 
   </div>
 );
 
-interface RateFieldProps {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}
+/** "hace 5 min" / "hace 2 h" / fecha corta si es de otro día. */
+const formatUpdatedAt = (iso: string): string => {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
 
-const RateField: React.FC<RateFieldProps> = ({ label, value, onChange }) => (
-  <div>
-    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</label>
-    <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-      <input
-        type="number"
-        className="w-full pl-6 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm"
-        value={value}
-        onChange={e => onChange(parseFloat(e.target.value))}
-      />
-    </div>
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) return 'recién';
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  return new Date(then).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
+const RateCard: React.FC<{ label: string; value: number }> = ({ label, value }) => (
+  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+    <p className="text-xl font-black text-slate-800 tracking-tight">
+      ${value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+    </p>
   </div>
 );
 
