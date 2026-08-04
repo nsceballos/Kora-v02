@@ -11,6 +11,13 @@
  * userId (resolved server-side from their session token, see api/_auth.ts)
  * and every write is stamped with that same userId — a user can never read
  * or overwrite another user's rows, even if they guess the row's ID.
+ *
+ * Quota: every Kora user shares the SAME Google service account, so they all
+ * share its per-minute Sheets API quota (60 read / 60 write requests per
+ * minute by default). Every function here is written to spend as few
+ * requests as possible — one read + one write per action is the target — and
+ * caches sheet existence / sheet IDs across calls within the same warm
+ * serverless instance instead of re-checking them on every request.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -65,6 +72,21 @@ function toCamelCase(header: string): string {
   return HEADER_MAP[header] || header.toLowerCase().replace(/\s/g, '');
 }
 
+function mapRow(headers: string[], row: string[]): any {
+  const obj: any = {};
+  headers.forEach((h: string, i: number) => {
+    let val: any = row[i] !== undefined ? row[i] : '';
+    if (NUMERIC_HEADERS.includes(h)) val = parseFloat(val) || 0;
+    if (BOOL_HEADERS.includes(h)) val = val === 'SI' || val === true || val === 'true';
+    obj[toCamelCase(h)] = val;
+  });
+  return obj;
+}
+
+function isMissingSheetError(e: any): boolean {
+  return e?.message?.includes('400') || e?.message?.includes('Unable to parse range');
+}
+
 export interface SheetsClientOptions {
   spreadsheetId: string;
   getToken: () => Promise<string>;
@@ -75,6 +97,13 @@ export function createSheetsClient(opts: SheetsClientOptions) {
   const { spreadsheetId, getToken } = opts;
   const doFetch = opts.fetchImpl || fetch;
   const baseUrl = `${SHEETS_API}/${spreadsheetId}`;
+
+  // Caches scoped to this client instance. A serverless function instance is
+  // reused ("warm") across many requests, so these avoid re-doing metadata
+  // lookups that don't change between calls — every one avoided is one less
+  // request against the shared per-minute quota.
+  const knownSheets = new Set<string>();
+  let sheetIdCache: Record<string, number> | null = null;
 
   async function apiRequest(url: string, options: RequestInit = {}): Promise<any> {
     const token = await getToken();
@@ -94,16 +123,26 @@ export function createSheetsClient(opts: SheetsClientOptions) {
     return res.json();
   }
 
-  async function ensureSheet(sheetName: string): Promise<void> {
-    try {
-      await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}!A1`);
-      return; // Sheet exists
-    } catch (e: any) {
-      if (!e.message.includes('400') && !e.message.includes('Unable to parse range')) {
-        throw e;
-      }
+  async function fetchSpreadsheetMeta(): Promise<Record<string, number>> {
+    const spreadsheet = await apiRequest(baseUrl);
+    const map: Record<string, number> = {};
+    for (const s of spreadsheet.sheets || []) {
+      map[s.properties.title] = s.properties.sheetId;
+      knownSheets.add(s.properties.title);
     }
+    sheetIdCache = map;
+    return map;
+  }
 
+  /** sheetId numérico de una hoja, cacheado entre llamadas (1 sola lectura de metadata por instancia tibia, no una por borrado). */
+  async function getSheetId(sheetName: string): Promise<number> {
+    if (!sheetIdCache || !(sheetName in sheetIdCache)) await fetchSpreadsheetMeta();
+    const id = sheetIdCache?.[sheetName];
+    if (id === undefined) throw new Error(`Hoja no encontrada: ${sheetName}`);
+    return id;
+  }
+
+  async function createSheet(sheetName: string): Promise<void> {
     await apiRequest(`${baseUrl}:batchUpdate`, {
       method: 'POST',
       body: JSON.stringify({ requests: [{ addSheet: { properties: { title: sheetName } } }] }),
@@ -116,32 +155,46 @@ export function createSheetsClient(opts: SheetsClientOptions) {
         body: JSON.stringify({ values: [headers] }),
       });
     }
+    knownSheets.add(sheetName);
+    sheetIdCache = null; // el nuevo sheetId se resuelve la próxima vez que haga falta
   }
 
-  async function readSheet(sheetName: string): Promise<any[]> {
+  /** Existencia de una hoja sin traer sus datos. Se saltea por completo si ya se confirmó antes en esta instancia. */
+  async function ensureSheetExists(sheetName: string): Promise<void> {
+    if (knownSheets.has(sheetName)) return;
+    try {
+      await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}!A1`);
+      knownSheets.add(sheetName);
+    } catch (e: any) {
+      if (!isMissingSheetError(e)) throw e;
+      await createSheet(sheetName);
+    }
+  }
+
+  /**
+   * Lectura completa de una hoja, en bruto (sin mapear a objetos). Autocura:
+   * si la hoja todavía no existe, la crea y devuelve vacío. Es la única
+   * lectura que hace falta para leer, verificar dueño y ubicar la fila a
+   * escribir/borrar — antes esas tres cosas eran 3 llamadas separadas.
+   */
+  async function readSheetRaw(sheetName: string): Promise<{ headers: string[]; dataRows: string[][] }> {
     try {
       const result = await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}`);
+      knownSheets.add(sheetName);
       const values: string[][] = result.values || [];
-      if (values.length <= 1) return [];
-
-      const headers = values[0];
-      return values.slice(1).map(row => {
-        const obj: any = {};
-        headers.forEach((h: string, i: number) => {
-          let val: any = row[i] !== undefined ? row[i] : '';
-          if (NUMERIC_HEADERS.includes(h)) val = parseFloat(val) || 0;
-          if (BOOL_HEADERS.includes(h)) val = val === 'SI' || val === true || val === 'true';
-          obj[toCamelCase(h)] = val;
-        });
-        return obj;
-      });
+      return { headers: values[0] || SHEET_HEADERS[sheetName] || [], dataRows: values.slice(1) };
     } catch (e: any) {
-      if (e.message.includes('400') || e.message.includes('Unable to parse range')) {
-        await ensureSheet(sheetName);
-        return [];
+      if (isMissingSheetError(e)) {
+        await createSheet(sheetName);
+        return { headers: SHEET_HEADERS[sheetName] || [], dataRows: [] };
       }
       throw e;
     }
+  }
+
+  async function readSheet(sheetName: string): Promise<any[]> {
+    const { headers, dataRows } = await readSheetRaw(sheetName);
+    return dataRows.map(row => mapRow(headers, row));
   }
 
   /** Rows belonging to `userId` only — the only view any per-user action is allowed to return. */
@@ -150,87 +203,121 @@ export function createSheetsClient(opts: SheetsClientOptions) {
     return rows.filter(r => String(r.userId) === String(userId));
   }
 
-  async function findRowById(sheetName: string, id: string): Promise<number> {
-    const result = await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}!A:A`);
-    const col: string[][] = result.values || [];
-    for (let i = 1; i < col.length; i++) {
-      if (col[i][0] !== undefined && String(col[i][0]) === String(id)) return i + 1;
+  /**
+   * Trae varias hojas en UNA sola llamada a la API (values:batchGet), en vez
+   * de una llamada por hoja. Si alguna hoja todavía no existe (spreadsheet
+   * recién creado, antes de la primera escritura) batchGet falla entero;
+   * en ese caso se cae a leerlas una por una, que sí autocura cada una.
+   */
+  async function batchReadSheets(sheetNames: string[]): Promise<Record<string, any[]>> {
+    try {
+      const params = sheetNames.map(n => `ranges=${encodeURIComponent(n)}`).join('&');
+      const result = await apiRequest(`${baseUrl}/values:batchGet?${params}`);
+      const out: Record<string, any[]> = {};
+      (result.valueRanges || []).forEach((vr: any, i: number) => {
+        const name = sheetNames[i];
+        const values: string[][] = vr.values || [];
+        const headers = values[0] || SHEET_HEADERS[name] || [];
+        out[name] = values.slice(1).map(row => mapRow(headers, row));
+        knownSheets.add(name);
+      });
+      return out;
+    } catch {
+      const out: Record<string, any[]> = {};
+      await Promise.all(sheetNames.map(async name => { out[name] = await readSheet(name); }));
+      return out;
     }
-    return -1;
   }
 
+  async function writeRow(sheetName: string, dataRowIndex: number, values: any[]): Promise<void> {
+    // dataRowIndex es 0-based dentro de dataRows (sin encabezado); la fila real
+    // de la hoja es +2 (1 por el encabezado, 1 porque Sheets es 1-based).
+    const range = `${sheetName}!A${dataRowIndex + 2}`;
+    await apiRequest(`${baseUrl}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ values: [values] }),
+    });
+  }
+
+  async function appendRow(sheetName: string, values: any[]): Promise<void> {
+    await appendRows(sheetName, [values]);
+  }
+
+  /** Igual que appendRow, pero para varias filas en una sola llamada (importación masiva). */
+  async function appendRows(sheetName: string, rows: any[][]): Promise<void> {
+    await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: 'POST',
+      body: JSON.stringify({ values: rows }),
+    });
+  }
+
+  /** Upsert por columna A (ID). Una sola lectura (ya autocurada) + una escritura. */
   async function upsertRow(sheetName: string, id: string, values: any[]): Promise<void> {
-    await ensureSheet(sheetName);
-    const rowIdx = await findRowById(sheetName, id);
+    const { dataRows } = await readSheetRaw(sheetName);
+    const rowIndex = dataRows.findIndex(r => String(r[0]) === String(id));
+    if (rowIndex >= 0) await writeRow(sheetName, rowIndex, values);
+    else await appendRow(sheetName, values);
+  }
 
-    if (rowIdx > 0) {
-      const range = `${sheetName}!A${rowIdx}`;
-      await apiRequest(`${baseUrl}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
-        method: 'PUT',
-        body: JSON.stringify({ values: [values] }),
-      });
+  /**
+   * Como upsertRow, pero primero verifica dueño: si la fila ya existe y su
+   * columna UserId no coincide, rechaza la escritura. Sigue siendo una sola
+   * lectura (antes: una lectura para el chequeo de dueño + otra separada solo
+   * para ubicar la fila).
+   */
+  async function upsertOwnedRow(sheetName: string, id: string, userId: string, values: any[]): Promise<void> {
+    const { headers, dataRows } = await readSheetRaw(sheetName);
+    const userColIdx = headers.indexOf('UserId');
+    const rowIndex = dataRows.findIndex(r => String(r[0]) === String(id));
+
+    if (rowIndex >= 0) {
+      if (String(dataRows[rowIndex][userColIdx]) !== String(userId)) throw new Error('FORBIDDEN');
+      await writeRow(sheetName, rowIndex, values);
     } else {
-      await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-        method: 'POST',
-        body: JSON.stringify({ values: [values] }),
-      });
+      await appendRow(sheetName, values);
     }
   }
 
-  async function deleteRowById(sheetName: string, id: string): Promise<boolean> {
-    const rowIdx = await findRowById(sheetName, id);
-    if (rowIdx < 0) return false;
+  /** Borra una fila propia. Una lectura (para ubicarla y verificar dueño) + el sheetId cacheado + una escritura. */
+  async function deleteOwnedRow(sheetName: string, id: string, userId: string): Promise<boolean> {
+    const { headers, dataRows } = await readSheetRaw(sheetName);
+    const userColIdx = headers.indexOf('UserId');
+    const rowIndex = dataRows.findIndex(r => String(r[0]) === String(id));
+    if (rowIndex < 0) return false;
+    if (String(dataRows[rowIndex][userColIdx]) !== String(userId)) throw new Error('FORBIDDEN');
 
-    const spreadsheet = await apiRequest(baseUrl);
-    const sheet = spreadsheet.sheets?.find((s: any) => s.properties?.title === sheetName);
-    if (!sheet) return false;
-
+    const sheetId = await getSheetId(sheetName);
     await apiRequest(`${baseUrl}:batchUpdate`, {
       method: 'POST',
       body: JSON.stringify({
         requests: [{
           deleteDimension: {
-            range: { sheetId: sheet.properties.sheetId, dimension: 'ROWS', startIndex: rowIdx - 1, endIndex: rowIdx },
-          }
-        }]
+            range: { sheetId, dimension: 'ROWS', startIndex: rowIndex + 1, endIndex: rowIndex + 2 },
+          },
+        }],
       }),
     });
     return true;
   }
 
   async function overwriteSheet(sheetName: string, values: any[][]): Promise<void> {
-    await ensureSheet(sheetName);
     await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}?valueInputOption=RAW`, {
       method: 'PUT',
       body: JSON.stringify({ range: sheetName, values }),
     });
+    knownSheets.add(sheetName);
   }
 
   /**
-   * Guards updates to an existing id-keyed row: if the row already exists and
-   * belongs to a different user, refuse the write instead of overwriting it.
-   * New rows (no existing id) are always allowed — they'll be stamped with
-   * the caller's own userId by the calling method.
+   * Busca un usuario por id y además devuelve la posición de su fila, para
+   * poder reescribirla sin una segunda lectura (updateProfile/changePassword
+   * necesitan las dos cosas: los datos actuales del usuario y dónde escribir).
    */
-  async function assertOwnedOrNew(sheetName: string, id: string, userId: string): Promise<void> {
-    const rows = await readSheet(sheetName);
-    const existing = rows.find(r => String(r.id) === String(id));
-    if (existing && String(existing.userId) !== String(userId)) {
-      throw new Error('FORBIDDEN');
-    }
-  }
-
-  async function deleteOwnedRowById(sheetName: string, id: string, userId: string): Promise<boolean> {
-    const rows = await readSheet(sheetName);
-    const existing = rows.find(r => String(r.id) === String(id));
-    if (!existing) return false;
-    if (String(existing.userId) !== String(userId)) throw new Error('FORBIDDEN');
-    return deleteRowById(sheetName, id);
-  }
-
-  async function findUserRawById(id: string): Promise<any | null> {
-    const rows = await readSheet(SHEET_NAMES.USERS);
-    return rows.find(u => String(u.id) === String(id)) ?? null;
+  async function findUserRow(id: string): Promise<{ index: number; user: any } | null> {
+    const { headers, dataRows } = await readSheetRaw(SHEET_NAMES.USERS);
+    const index = dataRows.findIndex(r => String(r[0]) === String(id));
+    if (index < 0) return null;
+    return { index, user: mapRow(headers, dataRows[index]) };
   }
 
   function publicUser(u: any) {
@@ -245,35 +332,31 @@ export function createSheetsClient(opts: SheetsClientOptions) {
   return {
     // ── Datos personales (aislados por usuario) ──────────────────
     async getAppData(userId: string) {
-      const [transactions, accounts, categories, budgets, settlements, configRows] = await Promise.all([
-        readOwnRows(SHEET_NAMES.TRANSACTIONS, userId),
-        readOwnRows(SHEET_NAMES.ACCOUNTS, userId),
-        readOwnRows(SHEET_NAMES.CATEGORIES, userId),
-        readOwnRows(SHEET_NAMES.BUDGETS, userId),
-        readOwnRows(SHEET_NAMES.SETTLEMENTS, userId),
-        readSheet(SHEET_NAMES.CONFIG),
+      const sheets = await batchReadSheets([
+        SHEET_NAMES.TRANSACTIONS, SHEET_NAMES.ACCOUNTS, SHEET_NAMES.CATEGORIES,
+        SHEET_NAMES.BUDGETS, SHEET_NAMES.SETTLEMENTS, SHEET_NAMES.CONFIG,
       ]);
+      const mine = (name: string) => sheets[name].filter((r: any) => String(r.userId) === String(userId));
 
       const config: Record<string, string> = {};
       const prefix = `${userId}::`;
-      configRows.forEach((r: any) => {
+      sheets[SHEET_NAMES.CONFIG].forEach((r: any) => {
         const key = String(r.key ?? '');
         if (key.startsWith(prefix)) config[key.slice(prefix.length)] = String(r.value ?? '');
       });
 
       return {
-        transactions: transactions.filter(t => t.id && t.amount !== undefined),
-        accounts: accounts.filter(a => a.id && a.balance !== undefined),
-        categories: categories.map(r => r.name).filter(Boolean),
-        budgets: budgets.map(b => ({ category: b.category, limit: b.limit })),
-        settlements: settlements.filter(s => s.id),
+        transactions: mine(SHEET_NAMES.TRANSACTIONS).filter((t: any) => t.id && t.amount !== undefined),
+        accounts: mine(SHEET_NAMES.ACCOUNTS).filter((a: any) => a.id && a.balance !== undefined),
+        categories: mine(SHEET_NAMES.CATEGORIES).map((r: any) => r.name).filter(Boolean),
+        budgets: mine(SHEET_NAMES.BUDGETS).map((b: any) => ({ category: b.category, limit: b.limit })),
+        settlements: mine(SHEET_NAMES.SETTLEMENTS).filter((s: any) => s.id),
         config,
       };
     },
 
     async saveTransaction(userId: string, t: any) {
       if (!t || !t.id) return { error: 'Transacción inválida' };
-      await assertOwnedOrNew(SHEET_NAMES.TRANSACTIONS, t.id, userId);
       const vals = [
         t.id, userId, t.date, t.concept, t.amount, t.currency,
         t.category || 'Varios', t.subcategory || '', t.sourceAccount,
@@ -281,7 +364,7 @@ export function createSheetsClient(opts: SheetsClientOptions) {
         t.isShared ? 'SI' : 'NO', t.paidBy || '',
         t.isSettled ? 'SI' : 'NO',
       ];
-      await upsertRow(SHEET_NAMES.TRANSACTIONS, t.id, vals);
+      await upsertOwnedRow(SHEET_NAMES.TRANSACTIONS, t.id, userId, vals);
       return { success: true, id: t.id };
     },
 
@@ -301,7 +384,7 @@ export function createSheetsClient(opts: SheetsClientOptions) {
         throw new Error('IMPORT_TOO_LARGE');
       }
 
-      await ensureSheet(SHEET_NAMES.TRANSACTIONS);
+      await ensureSheetExists(SHEET_NAMES.TRANSACTIONS);
 
       const values = transactions.map(t => [
         randomUUID(), userId, t.date, t.concept, t.amount, t.currency,
@@ -311,19 +394,14 @@ export function createSheetsClient(opts: SheetsClientOptions) {
         t.isSettled ? 'SI' : 'NO',
       ]);
 
-      await apiRequest(
-        `${baseUrl}/values/${encodeURIComponent(SHEET_NAMES.TRANSACTIONS)}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
-        { method: 'POST', body: JSON.stringify({ values }) },
-      );
-
+      await appendRows(SHEET_NAMES.TRANSACTIONS, values);
       return { success: true, imported: values.length };
     },
 
     async saveAccount(userId: string, acc: any) {
       if (!acc || !acc.id) return { error: 'Cuenta inválida' };
-      await assertOwnedOrNew(SHEET_NAMES.ACCOUNTS, acc.id, userId);
       const vals = [acc.id, userId, acc.name, acc.type, acc.balance, acc.currency, acc.closingDate || '', acc.dueDate || ''];
-      await upsertRow(SHEET_NAMES.ACCOUNTS, acc.id, vals);
+      await upsertOwnedRow(SHEET_NAMES.ACCOUNTS, acc.id, userId, vals);
       return { success: true, id: acc.id };
     },
 
@@ -355,14 +433,13 @@ export function createSheetsClient(opts: SheetsClientOptions) {
 
     async saveSettlement(userId: string, s: any) {
       if (!s || !s.id) return { error: 'Cierre inválido' };
-      await assertOwnedOrNew(SHEET_NAMES.SETTLEMENTS, s.id, userId);
       const vals = [
         s.id, userId, s.date, s.period, s.total,
         s.userA, s.paidA, s.percentA,
         s.userB, s.paidB, s.percentB,
         s.debtor || '', s.creditor || '', s.amount, s.txCount,
       ];
-      await upsertRow(SHEET_NAMES.SETTLEMENTS, s.id, vals);
+      await upsertOwnedRow(SHEET_NAMES.SETTLEMENTS, s.id, userId, vals);
       return { success: true, id: s.id };
     },
 
@@ -374,36 +451,38 @@ export function createSheetsClient(opts: SheetsClientOptions) {
     },
 
     async deleteTransaction(userId: string, data: { id: string }) {
-      const ok = await deleteOwnedRowById(SHEET_NAMES.TRANSACTIONS, data.id, userId);
+      const ok = await deleteOwnedRow(SHEET_NAMES.TRANSACTIONS, data.id, userId);
       return { success: ok };
     },
 
     async deleteAccount(userId: string, data: { id: string }) {
-      const ok = await deleteOwnedRowById(SHEET_NAMES.ACCOUNTS, data.id, userId);
+      const ok = await deleteOwnedRow(SHEET_NAMES.ACCOUNTS, data.id, userId);
       return { success: ok };
     },
 
     // ── Cuenta / perfil (Usuarios) ────────────────────────────────
     async updateProfile(userId: string, data: { name?: string }) {
-      const user = await findUserRawById(userId);
-      if (!user) return { error: 'Usuario no encontrado' };
+      const found = await findUserRow(userId);
+      if (!found) return { error: 'Usuario no encontrado' };
+      const { user } = found;
       if (typeof data?.name === 'string' && data.name.trim()) {
         user.name = data.name.trim().slice(0, 60);
       }
-      await upsertRow(SHEET_NAMES.USERS, user.id, [user.id, user.name, user.email, user.passwordHash, user.color, user.registeredAt]);
+      await writeRow(SHEET_NAMES.USERS, found.index, [user.id, user.name, user.email, user.passwordHash, user.color, user.registeredAt]);
       return { success: true, user: publicUser(user) };
     },
 
     async changePassword(userId: string, data: { currentPassword: string; newPassword: string }) {
-      const user = await findUserRawById(userId);
-      if (!user) return { error: 'Usuario no encontrado' };
+      const found = await findUserRow(userId);
+      if (!found) return { error: 'Usuario no encontrado' };
+      const { user } = found;
       const ok = await comparePassword(data?.currentPassword || '', user.passwordHash);
       if (!ok) return { error: 'INVALID_PASSWORD' };
       if (!data?.newPassword || data.newPassword.length < 6) {
         return { error: 'La nueva contraseña debe tener al menos 6 caracteres' };
       }
       user.passwordHash = await hashPassword(data.newPassword);
-      await upsertRow(SHEET_NAMES.USERS, user.id, [user.id, user.name, user.email, user.passwordHash, user.color, user.registeredAt]);
+      await writeRow(SHEET_NAMES.USERS, found.index, [user.id, user.name, user.email, user.passwordHash, user.color, user.registeredAt]);
       return { success: true };
     },
 
