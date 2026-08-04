@@ -92,3 +92,32 @@ export function applyToBalances(
 
   return { accounts: updated, changed };
 }
+
+/**
+ * Recalcula el saldo de cada cuenta desde cero, sumando el impacto de **todos**
+ * sus movimientos.
+ *
+ * Sirve para reconstruir los saldos cuando quedaron desincronizados: por
+ * ejemplo, movimientos importados antes de que la app aplicara su impacto, o
+ * cuentas creadas después de cargar sus movimientos. Es idempotente: aplicarlo
+ * dos veces da el mismo resultado.
+ *
+ * Ojo: el saldo resultante es exactamente el neto de los movimientos, así que
+ * cualquier saldo inicial cargado a mano que no tenga movimientos que lo
+ * respalden se pierde.
+ */
+export function recalculateBalances(
+  accounts: Account[],
+  movements: BalanceMovement[],
+  usdRate: number,
+): BalanceUpdate {
+  const zeroed = accounts.map(account => ({ ...account, balance: 0 }));
+  const recalculated = applyToBalances(zeroed, movements, usdRate, 1).accounts;
+
+  const changed = recalculated.filter(account => {
+    const previous = accounts.find(a => a.id === account.id);
+    return previous && previous.balance !== account.balance;
+  });
+
+  return { accounts: recalculated, changed };
+}

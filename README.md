@@ -151,6 +151,13 @@ Los movimientos importados **ajustan el saldo de cada cuenta**, con el mismo cri
 
 Las cuentas creadas durante la importación arrancan en 0, así que quedan con el neto de lo importado. Si un movimiento viene en una moneda distinta a la de su cuenta, se convierte usando el dólar oficial (venta) del momento.
 
+## Recalcular saldos
+En **Ajustes → Recalcular saldos**. Reconstruye el saldo de cada cuenta sumando **todos** sus movimientos desde cero, y muestra una vista previa (saldo actual → saldo que quedaría) antes de aplicar.
+
+Sirve cuando los saldos quedaron desincronizados de los movimientos, por ejemplo si se importaron movimientos con una versión de la app que todavía no aplicaba su impacto. Es idempotente: aplicarlo dos veces da el mismo resultado, y si los saldos ya coinciden no ofrece cambios.
+
+> El saldo resultante es exactamente el neto de los movimientos, así que un saldo inicial cargado a mano que no tenga movimientos que lo respalden se pierde.
+
 ## Cierre mensual de gastos compartidos
 En la vista **Gastos Pareja**:
 1. En **Ajustes → Gastos Compartidos** definí el nombre de la persona con quien compartís gastos (es solo una etiqueta para tus propios registros, no una cuenta).

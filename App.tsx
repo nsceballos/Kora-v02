@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   LayoutDashboard,
   Receipt,
@@ -22,7 +22,7 @@ import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
 import { sheetService, UnauthorizedError } from './services/sheetService';
-import { applyToBalances, type BalanceMovement } from './services/balanceService';
+import { applyToBalances, recalculateBalances, type BalanceMovement } from './services/balanceService';
 import { authService } from './services/authService';
 import { ratesService } from './services/ratesService';
 import LoginScreen from './components/LoginScreen';
@@ -348,6 +348,39 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Saldos reconstruidos desde los movimientos, para poder mostrar qué
+   * cambiaría antes de aplicarlo.
+   */
+  const balanceRecalc = useMemo(
+    () => recalculateBalances(accounts, transactions, usdRates.official),
+    [accounts, transactions, usdRates.official],
+  );
+
+  const balanceChanges = useMemo(
+    () => balanceRecalc.changed.map(acc => ({
+      id: acc.id,
+      name: acc.name,
+      from: accounts.find(a => a.id === acc.id)?.balance ?? 0,
+      to: acc.balance,
+      currency: acc.currency,
+    })),
+    [balanceRecalc, accounts],
+  );
+
+  /** Aplica el recálculo de saldos y lo persiste. */
+  const handleRecalculateBalances = async () => {
+    if (balanceRecalc.changed.length === 0) return;
+    setIsSyncing(true);
+    try {
+      setAccounts(balanceRecalc.accounts);
+      await Promise.all(balanceRecalc.changed.map(acc => sheetService.saveAccount(acc)));
+      showSuccessToast();
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateBudgets = async (newBudgets: Budget[]) => {
     setBudgets(newBudgets);
     setIsSyncing(true);
@@ -523,6 +556,8 @@ const App: React.FC = () => {
                 partnerName={partnerName}
                 onUpdatePartnerName={handleUpdatePartnerName}
                 onOpenImport={() => setIsImportOpen(true)}
+                balanceChanges={balanceChanges}
+                onRecalculateBalances={handleRecalculateBalances}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}

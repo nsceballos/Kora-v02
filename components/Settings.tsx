@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2, RefreshCw, FileSpreadsheet, Upload } from 'lucide-react';
-import { Budget, AuthUser, UsdRates } from '../types';
+import { Tags, X, DollarSign, Save, Network, Database, Target, AlertCircle, CheckCircle2, UserCircle, Heart, KeyRound, Loader2, RefreshCw, FileSpreadsheet, Upload, Calculator } from 'lucide-react';
+import { Budget, AuthUser, UsdRates, Currency, formatCurrency } from '../types';
 
 interface Props {
   categories: string[];
@@ -18,6 +18,9 @@ interface Props {
   partnerName: string;
   onUpdatePartnerName: (name: string) => void;
   onOpenImport: () => void;
+  /** Diferencias entre el saldo guardado y el que surge de los movimientos. */
+  balanceChanges: { id: string; name: string; from: number; to: number; currency: Currency }[];
+  onRecalculateBalances: () => Promise<void>;
 }
 
 const Settings: React.FC<Props> = ({
@@ -28,7 +31,22 @@ const Settings: React.FC<Props> = ({
   currentUser, onUpdateName, onChangePassword,
   partnerName, onUpdatePartnerName,
   onOpenImport,
+  balanceChanges, onRecalculateBalances,
 }) => {
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalcDone, setRecalcDone] = useState(false);
+
+  const handleRecalculate = async () => {
+    setRecalculating(true);
+    try {
+      await onRecalculateBalances();
+      setRecalcDone(true);
+      setTimeout(() => setRecalcDone(false), 3000);
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
   const [newCat, setNewCat] = useState('');
   const [localWebhook, setLocalWebhook] = useState(n8nWebhookUrl);
   const [localBudgets, setLocalBudgets] = useState<Budget[]>([]);
@@ -135,6 +153,69 @@ const Settings: React.FC<Props> = ({
             >
               <Upload size={16} /> Importar archivo
             </button>
+          </div>
+        </section>
+
+        {/* ── Recalcular saldos ── */}
+        <section className="space-y-6">
+          <SectionHeader icon={Calculator} title="Recalcular saldos" color="cyan" />
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Reconstruye el saldo de cada cuenta sumando <b>todos</b> sus movimientos desde cero.
+              Sirve si importaste antes de que la app aplicara los saldos, o si alguno quedó
+              desincronizado. Aplicarlo dos veces da el mismo resultado.
+            </p>
+
+            {balanceChanges.length === 0 ? (
+              <p className="flex items-center gap-2 text-[11px] font-bold text-emerald-600">
+                <CheckCircle2 size={14} /> Los saldos ya coinciden con los movimientos.
+              </p>
+            ) : (
+              <>
+                <div className="border border-slate-100 rounded-2xl overflow-hidden max-h-56 overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-400 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 font-black uppercase text-[9px] tracking-widest">Cuenta</th>
+                        <th className="px-3 py-2 font-black uppercase text-[9px] tracking-widest text-right">Ahora</th>
+                        <th className="px-3 py-2 font-black uppercase text-[9px] tracking-widest text-right">Quedaría</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {balanceChanges.map(c => (
+                        <tr key={c.id}>
+                          <td className="px-3 py-2 font-bold text-slate-700">{c.name}</td>
+                          <td className="px-3 py-2 text-right text-slate-400 whitespace-nowrap">${formatCurrency(c.from, c.currency)}</td>
+                          <td className={`px-3 py-2 text-right font-bold whitespace-nowrap ${c.to < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            ${formatCurrency(c.to, c.currency)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRecalculate}
+                  disabled={recalculating}
+                  className={`w-full flex items-center justify-center gap-2 py-3 text-sm font-bold rounded-2xl transition-colors disabled:opacity-50 ${
+                    recalcDone ? 'bg-emerald-500 text-white' : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                  }`}
+                >
+                  {recalculating
+                    ? <><Loader2 size={16} className="animate-spin" /> Recalculando...</>
+                    : recalcDone
+                    ? <><CheckCircle2 size={16} /> Saldos actualizados</>
+                    : <><Calculator size={16} /> Recalcular {balanceChanges.length} cuenta(s)</>}
+                </button>
+
+                <p className="text-[10px] text-slate-400 italic">
+                  El saldo pasa a ser exactamente el neto de sus movimientos, así que un saldo inicial
+                  cargado a mano que no tenga movimientos que lo respalden se pierde.
+                </p>
+              </>
+            )}
           </div>
         </section>
 
