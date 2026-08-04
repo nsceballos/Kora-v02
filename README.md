@@ -106,6 +106,17 @@ Ningún endpoint expone el contenido de `Usuarios` (ni siquiera la contraseña h
 
 > El archivo `backend.gs` (Google Apps Script) quedó como referencia histórica de un backend alternativo previo a la cuenta de servicio; no se usa ni está actualizado al esquema actual con `UserId`.
 
+### Cuota de la API de Google Sheets
+**Todos los usuarios de Kora comparten la misma cuenta de servicio**, y por lo tanto comparten su cuota: por defecto, Google permite **60 lecturas y 60 escrituras por minuto** a esa cuenta (no por usuario de Kora, sino en total). Si la app crece o varias personas la usan al mismo tiempo, es fácil llegar a ese límite y que aparezca un error `429 RESOURCE_EXHAUSTED`.
+
+El código está escrito para gastar como mucho **1 lectura + 1 escritura** por acción (traer todos tus datos, guardar un gasto, borrar una cuenta, etc. — antes de una optimización, `getAppData` sola hacía 6 lecturas y guardar un gasto hacía 3+1). Aun así, si tenés muchos usuarios concurrentes puede no alcanzar. Para subir el límite:
+
+1. Entrá a [Google Cloud Console](https://console.cloud.google.com/) → seleccioná el proyecto de la cuenta de servicio.
+2. Ve a **APIs y servicios → Panel** → hacé clic en **Google Sheets API**.
+3. Pestaña **Cuotas y límites del sistema** (o **Quotas** en inglés).
+4. Buscá `Read requests per minute per user` y `Write requests per minute per user`, tildá las casillas y hacé clic en **Editar cuotas** (o el ícono del lápiz) para pedir un aumento. Google suele aprobar aumentos razonables (ej. a 300) en minutos para este tipo de cuota.
+5. Repetí para `Read requests per minute` y `Write requests per minute` (los límites a nivel proyecto, sin "per user") si también aparecen cerca del límite.
+
 ## Importar movimientos desde un .xlsx
 Desde **Ajustes → Importar movimientos**. El archivo se lee en el navegador (no se sube a ningún lado) y debe tener estas columnas en la primera fila:
 
