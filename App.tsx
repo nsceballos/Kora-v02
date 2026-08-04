@@ -247,9 +247,14 @@ const App: React.FC = () => {
     }
   };
 
-  /** Cierre mensual: marca los gastos compartidos pendientes como saldados y registra el cierre */
-  const handleMonthlyClose = async (settlement: Settlement) => {
-    const pendingShared = transactions.filter(t => t.isShared && !t.isSettled);
+  /**
+   * Cierre de gastos compartidos: marca como saldados **solo** los movimientos
+   * del período elegido (los ids los define SharedExpenses según la fecha de
+   * corte) y registra el cierre.
+   */
+  const handleMonthlyClose = async (settlement: Settlement, transactionIds: string[]) => {
+    const ids = new Set(transactionIds);
+    const pendingShared = transactions.filter(t => ids.has(t.id) && t.isShared && !t.isSettled);
     if (pendingShared.length === 0) return;
 
     const settled = pendingShared.map(t => ({ ...t, isSettled: true }));

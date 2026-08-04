@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Transaction, formatCurrency, Currency, Settlement, AuthUser, DEFAULT_SPLIT } from '../types';
-import { Users, ArrowRightLeft, CheckCircle2, History, Percent, CalendarCheck, X, Scale, Info } from 'lucide-react';
+import { Users, ArrowRightLeft, CheckCircle2, History, Percent, CalendarCheck, X, Scale, Info, CalendarClock } from 'lucide-react';
 
 interface Props {
   transactions: Transaction[];
   usdRate: number;
-  onSettle: (settlement: Settlement) => void;
+  /** Recibe el cierre y los ids de los movimientos que abarca (solo los del período). */
+  onSettle: (settlement: Settlement, transactionIds: string[]) => void;
   currentUser: AuthUser;
   /** Nombre de la persona con quien se comparten gastos. Es solo una etiqueta
    *  personal (no una cuenta real) — este resumen nunca es visible para nadie
@@ -22,6 +23,38 @@ const monthLabel = (isoDate: string): string => {
   const label = new Date(y, m - 1, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   return label.charAt(0).toUpperCase() + label.slice(1);
 };
+
+/** YYYY-MM-DD → DD/MM/AAAA */
+const dayLabel = (isoDate: string): string => {
+  const [y, m, d] = (isoDate || '').split('-');
+  return y && m && d ? `${d}/${m}/${y}` : isoDate;
+};
+
+const todayIso = () => new Date().toLocaleDateString('sv-SE'); // sv-SE ya da YYYY-MM-DD local
+
+/**
+ * Movimientos compartidos que entran en el próximo cierre: los que siguen sin
+ * saldar y tienen fecha hasta el corte, más recientes primero.
+ *
+ * No se filtra además por "posterior al último cierre" a propósito: un gasto
+ * cargado en forma retroactiva después de haber cerrado seguiría sin saldar y,
+ * con ese filtro, no aparecería nunca en ningún cierre.
+ */
+export function selectPending(transactions: Transaction[], cutoffDate: string): Transaction[] {
+  return transactions
+    .filter(t => t.isShared && !t.isSettled && t.date <= cutoffDate)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Etiqueta del período: "DD/MM/AAAA – DD/MM/AAAA", o solo el corte si no hay desde. */
+export function buildPeriodLabel(
+  lastSettlementDate: string | undefined,
+  oldestPendingDate: string | undefined,
+  cutoffDate: string,
+): string {
+  const from = lastSettlementDate ?? oldestPendingDate;
+  return from ? `${dayLabel(from)} – ${dayLabel(cutoffDate)}` : dayLabel(cutoffDate);
+}
 
 const SharedExpenses: React.FC<Props> = ({
   transactions, usdRate, onSettle,
@@ -40,12 +73,30 @@ const SharedExpenses: React.FC<Props> = ({
     onUpdateSplit(value);
   };
 
+  // ── Período del cierre ────────────────────────────────────────
+  /** Fecha del cierre más reciente: desde ahí se acumula lo que está pendiente. */
+  const lastSettlement = useMemo(
+    () => [...settlements].sort((a, b) => b.date.localeCompare(a.date))[0] ?? null,
+    [settlements]
+  );
+
+  /** Hasta qué día se incluyen los gastos en el próximo cierre. */
+  const [cutoffDate, setCutoffDate] = useState(todayIso);
+
   // ── Cálculo de saldos pendientes ──────────────────────────────
+  // Lo pendiente son los compartidos sin saldar con fecha hasta el corte. No se
+  // filtra por "posterior al último cierre" para no esconder un gasto cargado
+  // en forma retroactiva después de haber cerrado: seguiría sin saldar y no
+  // aparecería nunca.
   const pendingTransactions = useMemo(
-    () => transactions
-      .filter(t => t.isShared && !t.isSettled)
-      .sort((a, b) => b.date.localeCompare(a.date)),
-    [transactions]
+    () => selectPending(transactions, cutoffDate),
+    [transactions, cutoffDate]
+  );
+
+  /** Compartidos sin saldar que quedan fuera por ser posteriores al corte. */
+  const afterCutoffCount = useMemo(
+    () => transactions.filter(t => t.isShared && !t.isSettled && t.date > cutoffDate).length,
+    [transactions, cutoffDate]
   );
 
   const paidByMe = pendingTransactions
@@ -86,18 +137,26 @@ const SharedExpenses: React.FC<Props> = ({
   // ── Cierre mensual ────────────────────────────────────────────
   const [confirmingClose, setConfirmingClose] = useState(false);
 
-  const buildSettlement = (): Settlement => {
-    const months = pendingByMonth.map(([key]) => key).sort();
-    const period = months.length === 0
-      ? ''
-      : months.length === 1 || months[0] === months[months.length - 1]
-      ? monthLabel(`${months[months.length - 1]}-01`)
-      : `${monthLabel(`${months[0]}-01`)} – ${monthLabel(`${months[months.length - 1]}-01`)}`;
+  /**
+   * Rango que abarca el cierre: desde el día siguiente al último cierre (o el
+   * primer gasto pendiente, si es el primer cierre) hasta la fecha de corte.
+   */
+  const periodLabel = useMemo(
+    () => buildPeriodLabel(
+      lastSettlement?.date,
+      pendingTransactions[pendingTransactions.length - 1]?.date,
+      cutoffDate,
+    ),
+    [lastSettlement, pendingTransactions, cutoffDate]
+  );
 
+  const buildSettlement = (): Settlement => {
     return {
       id: crypto.randomUUID(),
-      date: new Date().toISOString().split('T')[0],
-      period,
+      // El cierre queda fechado en el corte elegido, no en el día en que se
+      // aprieta el botón: así el próximo período arranca donde termina este.
+      date: cutoffDate,
+      period: periodLabel,
       total: Math.round(totalShared * 100) / 100,
       userA: currentUser.name,
       paidA: Math.round(paidByMe * 100) / 100,
@@ -113,7 +172,7 @@ const SharedExpenses: React.FC<Props> = ({
   };
 
   const handleConfirmClose = () => {
-    onSettle(buildSettlement());
+    onSettle(buildSettlement(), pendingTransactions.map(t => t.id));
     setConfirmingClose(false);
   };
 
@@ -121,8 +180,70 @@ const SharedExpenses: React.FC<Props> = ({
     <div className="space-y-8 animate-in fade-in duration-500">
       <header>
         <h2 className="text-3xl font-bold text-slate-800">Gastos Compartidos</h2>
-        <p className="text-slate-500">Reparto {myPercent}/{partnerPercent} · Cierre y liquidación mensual</p>
+        <p className="text-slate-500">Reparto {myPercent}/{partnerPercent} · Período {periodLabel}</p>
       </header>
+
+      {/* Período: último cierre y fecha de corte */}
+      <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><CalendarClock size={18} /></div>
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm md:text-base">Período a saldar</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+              Lo pendiente desde el último cierre
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Último cierre</p>
+            {lastSettlement ? (
+              <>
+                <p className="text-lg font-black text-slate-800">{dayLabel(lastSettlement.date)}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {lastSettlement.amount > 0
+                    ? `${lastSettlement.debtor} transfirió $${formatCurrency(lastSettlement.amount)}`
+                    : 'Quedaron a mano'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-black text-slate-400">Sin cierres previos</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Este sería el primero</p>
+              </>
+            )}
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+              Nuevo cierre hasta
+            </label>
+            <input
+              type="date"
+              value={cutoffDate}
+              onChange={e => setCutoffDate(e.target.value || todayIso())}
+              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            {cutoffDate !== todayIso() && (
+              <button
+                type="button"
+                onClick={() => setCutoffDate(todayIso())}
+                className="mt-1.5 text-[10px] font-black uppercase tracking-widest text-indigo-500 hover:text-indigo-700"
+              >
+                Volver a hoy
+              </button>
+            )}
+          </div>
+        </div>
+
+        {afterCutoffCount > 0 && (
+          <p className="mt-3 text-[11px] text-amber-600 flex items-center gap-1.5 font-bold">
+            <Info size={12} className="shrink-0" />
+            {afterCutoffCount} movimiento(s) compartido(s) posteriores al corte quedan para el próximo cierre.
+          </p>
+        )}
+      </div>
 
       {/* Resumen de lo pagado */}
       <div className="grid grid-cols-3 gap-3 md:gap-6">
@@ -217,6 +338,7 @@ const SharedExpenses: React.FC<Props> = ({
           <div className="max-w-md mx-auto bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4 text-left animate-in fade-in duration-200">
             <p className="text-sm font-bold text-slate-700 text-center">Confirmar cierre</p>
             <ul className="text-xs text-slate-500 space-y-1.5">
+              <li className="flex justify-between"><span>Período</span><span className="font-bold text-slate-700">{periodLabel}</span></li>
               <li className="flex justify-between"><span>Movimientos a saldar</span><span className="font-bold text-slate-700">{pendingTransactions.length}</span></li>
               <li className="flex justify-between"><span>Total compartido</span><span className="font-bold text-slate-700">${formatCurrency(totalShared)}</span></li>
               <li className="flex justify-between"><span>Reparto aplicado</span><span className="font-bold text-slate-700">{myPercent}% / {partnerPercent}%</span></li>
