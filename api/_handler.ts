@@ -2,18 +2,23 @@
  * Kora - Shared request handler
  *
  * Framework-agnostic: takes a parsed action/data payload plus the caller's
- * access token and returns a status + JSON body. Used by both the Vercel
+ * session token and returns a status + JSON body. Used by both the Vercel
  * serverless function (api/sheets.ts) and the Vite dev middleware, so the
  * behaviour is identical in local development and production.
+ *
+ * Every action here is scoped to the authenticated user (resolved from the
+ * `Authorization: Bearer <token>` header) — see api/_auth.ts. There is no
+ * action that can read or write another user's rows.
  */
 
 import { createSheetsClient, handleAction } from './_sheetsCore';
-import { getServiceAccountToken, getSpreadsheetId, getAccessGate } from './_serviceAccount';
+import { getServiceAccountToken, getSpreadsheetId } from './_serviceAccount';
+import { getUserIdFromAuthHeader } from './_auth';
 
 export interface HandlerRequest {
   action?: string;
   data?: any;
-  token?: string | null;
+  authHeader?: string | null;
 }
 
 export interface HandlerResult {
@@ -34,9 +39,14 @@ function getClient() {
 }
 
 export async function handleRequest(req: HandlerRequest): Promise<HandlerResult> {
-  // Optional shared-secret gate (only enforced when KORA_ACCESS_TOKEN is set)
-  const gate = getAccessGate();
-  if (gate && req.token !== gate) {
+  let userId: string;
+  try {
+    userId = getUserIdFromAuthHeader(req.authHeader);
+  } catch (err: any) {
+    const message = err?.message || String(err);
+    if (message === 'MISSING_JWT_SECRET') {
+      return { status: 500, body: { error: 'SERVER_CONFIG', message } };
+    }
     return { status: 401, body: { error: 'UNAUTHORIZED' } };
   }
 
@@ -45,7 +55,7 @@ export async function handleRequest(req: HandlerRequest): Promise<HandlerResult>
   }
 
   try {
-    const result = await handleAction(getClient(), req.action, req.data);
+    const result = await handleAction(getClient(), req.action, userId, req.data);
     return { status: 200, body: result };
   } catch (err: any) {
     const message = err?.message || String(err);
@@ -53,6 +63,9 @@ export async function handleRequest(req: HandlerRequest): Promise<HandlerResult>
     // Configuration problems → 500 with a clear hint (not retryable client-side)
     if (message.startsWith('MISSING_') || message === 'TOKEN_REQUEST_FAILED') {
       return { status: 500, body: { error: 'SERVER_CONFIG', message } };
+    }
+    if (message === 'FORBIDDEN') {
+      return { status: 403, body: { error: 'FORBIDDEN' } };
     }
     if (message.startsWith('Acción no reconocida')) {
       return { status: 400, body: { error: message } };

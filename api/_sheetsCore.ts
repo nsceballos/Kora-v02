@@ -5,7 +5,16 @@
  * The access token, spreadsheet id and fetch implementation are injected so
  * this module can run inside a Vercel serverless function, a Vite dev
  * middleware, or a unit test with mocks — without touching the browser.
+ *
+ * Data isolation: every row in Transacciones/Cuentas/Categorias/Presupuestos/
+ * Cierres carries a `UserId` column. Every read filters by the caller's
+ * userId (resolved server-side from their session token, see api/_auth.ts)
+ * and every write is stamped with that same userId — a user can never read
+ * or overwrite another user's rows, even if they guess the row's ID.
  */
+
+import { randomUUID } from 'node:crypto';
+import { hashPassword, comparePassword } from './_auth';
 
 export const SHEET_NAMES = {
   TRANSACTIONS: 'Transacciones',
@@ -18,23 +27,23 @@ export const SHEET_NAMES = {
 } as const;
 
 const SHEET_HEADERS: Record<string, string[]> = {
-  [SHEET_NAMES.TRANSACTIONS]: ['ID', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Subcategoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado'],
-  [SHEET_NAMES.ACCOUNTS]: ['ID', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento'],
-  [SHEET_NAMES.CATEGORIES]: ['Nombre'],
-  [SHEET_NAMES.BUDGETS]: ['Categoria', 'Limite'],
-  [SHEET_NAMES.USERS]: ['ID', 'Nombre', 'Email', 'Avatar', 'Color', 'PIN', 'FechaRegistro'],
-  [SHEET_NAMES.SETTLEMENTS]: ['ID', 'Fecha', 'Periodo', 'Total', 'UsuarioA', 'PagoA', 'PorcentajeA', 'UsuarioB', 'PagoB', 'PorcentajeB', 'Deudor', 'Acreedor', 'Monto', 'Movimientos'],
+  [SHEET_NAMES.TRANSACTIONS]: ['ID', 'UserId', 'Fecha', 'Concepto', 'Monto', 'Moneda', 'Categoria', 'Subcategoria', 'Cuenta Origen', 'Cuenta Destino', 'Tipo', 'Compartido', 'Responsable', 'Saldado'],
+  [SHEET_NAMES.ACCOUNTS]: ['ID', 'UserId', 'Nombre', 'Tipo', 'Saldo', 'Moneda', 'Cierre', 'Vencimiento'],
+  [SHEET_NAMES.CATEGORIES]: ['UserId', 'Nombre'],
+  [SHEET_NAMES.BUDGETS]: ['UserId', 'Categoria', 'Limite'],
+  [SHEET_NAMES.USERS]: ['ID', 'Nombre', 'Email', 'PasswordHash', 'Color', 'FechaRegistro'],
+  [SHEET_NAMES.SETTLEMENTS]: ['ID', 'UserId', 'Fecha', 'Periodo', 'Total', 'UsuarioA', 'PagoA', 'PorcentajeA', 'UsuarioB', 'PagoB', 'PorcentajeB', 'Deudor', 'Acreedor', 'Monto', 'Movimientos'],
   [SHEET_NAMES.CONFIG]: ['Clave', 'Valor'],
 };
 
 const HEADER_MAP: Record<string, string> = {
-  'ID': 'id', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount',
+  'ID': 'id', 'UserId': 'userId', 'Fecha': 'date', 'Concepto': 'concept', 'Monto': 'amount',
   'Moneda': 'currency', 'Categoria': 'category', 'Subcategoria': 'subcategory',
   'Cuenta Origen': 'sourceAccount', 'Cuenta Destino': 'destinationAccount',
   'Tipo': 'type', 'Compartido': 'isShared', 'Responsable': 'paidBy',
   'Saldado': 'isSettled', 'Nombre': 'name', 'Saldo': 'balance',
   'Cierre': 'closingDate', 'Vencimiento': 'dueDate', 'Limite': 'limit',
-  'Email': 'email', 'Avatar': 'avatar', 'Color': 'color', 'PIN': 'pin',
+  'Email': 'email', 'PasswordHash': 'passwordHash', 'Color': 'color',
   'FechaRegistro': 'registeredAt',
   'Periodo': 'period', 'Total': 'total', 'UsuarioA': 'userA', 'PagoA': 'paidA',
   'PorcentajeA': 'percentA', 'UsuarioB': 'userB', 'PagoB': 'paidB',
@@ -44,6 +53,8 @@ const HEADER_MAP: Record<string, string> = {
 
 const NUMERIC_HEADERS = ['Monto', 'Saldo', 'Limite', 'Total', 'PagoA', 'PorcentajeA', 'PagoB', 'PorcentajeB', 'Movimientos'];
 const BOOL_HEADERS = ['Compartido', 'Saldado'];
+
+const AVATAR_COLORS = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 
@@ -130,6 +141,12 @@ export function createSheetsClient(opts: SheetsClientOptions) {
     }
   }
 
+  /** Rows belonging to `userId` only — the only view any per-user action is allowed to return. */
+  async function readOwnRows(sheetName: string, userId: string): Promise<any[]> {
+    const rows = await readSheet(sheetName);
+    return rows.filter(r => String(r.userId) === String(userId));
+  }
+
   async function findRowById(sheetName: string, id: string): Promise<number> {
     const result = await apiRequest(`${baseUrl}/values/${encodeURIComponent(sheetName)}!A:A`);
     const col: string[][] = result.values || [];
@@ -186,33 +203,76 @@ export function createSheetsClient(opts: SheetsClientOptions) {
     });
   }
 
+  /**
+   * Guards updates to an existing id-keyed row: if the row already exists and
+   * belongs to a different user, refuse the write instead of overwriting it.
+   * New rows (no existing id) are always allowed — they'll be stamped with
+   * the caller's own userId by the calling method.
+   */
+  async function assertOwnedOrNew(sheetName: string, id: string, userId: string): Promise<void> {
+    const rows = await readSheet(sheetName);
+    const existing = rows.find(r => String(r.id) === String(id));
+    if (existing && String(existing.userId) !== String(userId)) {
+      throw new Error('FORBIDDEN');
+    }
+  }
+
+  async function deleteOwnedRowById(sheetName: string, id: string, userId: string): Promise<boolean> {
+    const rows = await readSheet(sheetName);
+    const existing = rows.find(r => String(r.id) === String(id));
+    if (!existing) return false;
+    if (String(existing.userId) !== String(userId)) throw new Error('FORBIDDEN');
+    return deleteRowById(sheetName, id);
+  }
+
+  async function findUserRawById(id: string): Promise<any | null> {
+    const rows = await readSheet(SHEET_NAMES.USERS);
+    return rows.find(u => String(u.id) === String(id)) ?? null;
+  }
+
+  function publicUser(u: any) {
+    return {
+      id: String(u.id),
+      name: String(u.name),
+      email: String(u.email),
+      color: AVATAR_COLORS.includes(u.color) ? u.color : 'indigo',
+    };
+  }
+
   return {
-    async getAppData() {
+    // ── Datos personales (aislados por usuario) ──────────────────
+    async getAppData(userId: string) {
       const [transactions, accounts, categories, budgets, settlements, configRows] = await Promise.all([
-        readSheet(SHEET_NAMES.TRANSACTIONS),
-        readSheet(SHEET_NAMES.ACCOUNTS),
-        readSheet(SHEET_NAMES.CATEGORIES),
-        readSheet(SHEET_NAMES.BUDGETS),
-        readSheet(SHEET_NAMES.SETTLEMENTS),
+        readOwnRows(SHEET_NAMES.TRANSACTIONS, userId),
+        readOwnRows(SHEET_NAMES.ACCOUNTS, userId),
+        readOwnRows(SHEET_NAMES.CATEGORIES, userId),
+        readOwnRows(SHEET_NAMES.BUDGETS, userId),
+        readOwnRows(SHEET_NAMES.SETTLEMENTS, userId),
         readSheet(SHEET_NAMES.CONFIG),
       ]);
 
       const config: Record<string, string> = {};
-      configRows.forEach((r: any) => { if (r.key) config[String(r.key)] = String(r.value ?? ''); });
+      const prefix = `${userId}::`;
+      configRows.forEach((r: any) => {
+        const key = String(r.key ?? '');
+        if (key.startsWith(prefix)) config[key.slice(prefix.length)] = String(r.value ?? '');
+      });
 
       return {
         transactions: transactions.filter(t => t.id && t.amount !== undefined),
         accounts: accounts.filter(a => a.id && a.balance !== undefined),
-        categories: categories.map(r => r.name || r.nombre).filter(Boolean),
-        budgets,
+        categories: categories.map(r => r.name).filter(Boolean),
+        budgets: budgets.map(b => ({ category: b.category, limit: b.limit })),
         settlements: settlements.filter(s => s.id),
         config,
       };
     },
 
-    async saveTransaction(t: any) {
+    async saveTransaction(userId: string, t: any) {
+      if (!t || !t.id) return { error: 'Transacción inválida' };
+      await assertOwnedOrNew(SHEET_NAMES.TRANSACTIONS, t.id, userId);
       const vals = [
-        t.id, t.date, t.concept, t.amount, t.currency,
+        t.id, userId, t.date, t.concept, t.amount, t.currency,
         t.category || 'Varios', t.subcategory || '', t.sourceAccount,
         t.destinationAccount || '', t.type,
         t.isShared ? 'SI' : 'NO', t.paidBy || '',
@@ -222,27 +282,45 @@ export function createSheetsClient(opts: SheetsClientOptions) {
       return { success: true, id: t.id };
     },
 
-    async saveAccount(acc: any) {
-      const vals = [acc.id, acc.name, acc.type, acc.balance, acc.currency, acc.closingDate || '', acc.dueDate || ''];
+    async saveAccount(userId: string, acc: any) {
+      if (!acc || !acc.id) return { error: 'Cuenta inválida' };
+      await assertOwnedOrNew(SHEET_NAMES.ACCOUNTS, acc.id, userId);
+      const vals = [acc.id, userId, acc.name, acc.type, acc.balance, acc.currency, acc.closingDate || '', acc.dueDate || ''];
       await upsertRow(SHEET_NAMES.ACCOUNTS, acc.id, vals);
       return { success: true, id: acc.id };
     },
 
-    async saveCategories(categories: string[]) {
-      const values = [['Nombre'], ...(categories || []).filter(Boolean).map(c => [c])];
+    async saveCategories(userId: string, categories: string[]) {
+      const rows = await readSheet(SHEET_NAMES.CATEGORIES);
+      const others = rows.filter(r => String(r.userId) !== String(userId));
+      const mine = (categories || []).filter(Boolean).map(name => ({ userId, name }));
+      const values = [
+        SHEET_HEADERS[SHEET_NAMES.CATEGORIES],
+        ...others.map(r => [r.userId, r.name]),
+        ...mine.map(r => [r.userId, r.name]),
+      ];
       await overwriteSheet(SHEET_NAMES.CATEGORIES, values);
       return { success: true };
     },
 
-    async saveBudgets(budgets: any[]) {
-      const values = [['Categoria', 'Limite'], ...(budgets || []).map(b => [b.category, b.limit])];
+    async saveBudgets(userId: string, budgets: any[]) {
+      const rows = await readSheet(SHEET_NAMES.BUDGETS);
+      const others = rows.filter(r => String(r.userId) !== String(userId));
+      const mine = (budgets || []).map(b => ({ userId, category: b.category, limit: b.limit }));
+      const values = [
+        SHEET_HEADERS[SHEET_NAMES.BUDGETS],
+        ...others.map(r => [r.userId, r.category, r.limit]),
+        ...mine.map(r => [r.userId, r.category, r.limit]),
+      ];
       await overwriteSheet(SHEET_NAMES.BUDGETS, values);
       return { success: true };
     },
 
-    async saveSettlement(s: any) {
+    async saveSettlement(userId: string, s: any) {
+      if (!s || !s.id) return { error: 'Cierre inválido' };
+      await assertOwnedOrNew(SHEET_NAMES.SETTLEMENTS, s.id, userId);
       const vals = [
-        s.id, s.date, s.period, s.total,
+        s.id, userId, s.date, s.period, s.total,
         s.userA, s.paidA, s.percentA,
         s.userB, s.paidB, s.percentB,
         s.debtor || '', s.creditor || '', s.amount, s.txCount,
@@ -251,49 +329,65 @@ export function createSheetsClient(opts: SheetsClientOptions) {
       return { success: true, id: s.id };
     },
 
-    async saveConfig(data: { key: string; value: string }) {
-      await upsertRow(SHEET_NAMES.CONFIG, data.key, [data.key, data.value]);
+    async saveConfig(userId: string, data: { key: string; value: string }) {
+      if (!data || !data.key) return { error: 'Config inválida' };
+      const compositeKey = `${userId}::${data.key}`;
+      await upsertRow(SHEET_NAMES.CONFIG, compositeKey, [compositeKey, data.value ?? '']);
       return { success: true };
     },
 
-    async deleteTransaction(data: { id: string }) {
-      const ok = await deleteRowById(SHEET_NAMES.TRANSACTIONS, data.id);
+    async deleteTransaction(userId: string, data: { id: string }) {
+      const ok = await deleteOwnedRowById(SHEET_NAMES.TRANSACTIONS, data.id, userId);
       return { success: ok };
     },
 
-    async deleteAccount(data: { id: string }) {
-      const ok = await deleteRowById(SHEET_NAMES.ACCOUNTS, data.id);
+    async deleteAccount(userId: string, data: { id: string }) {
+      const ok = await deleteOwnedRowById(SHEET_NAMES.ACCOUNTS, data.id, userId);
       return { success: ok };
     },
 
-    async getUsers() {
+    // ── Cuenta / perfil (Usuarios) ────────────────────────────────
+    async updateProfile(userId: string, data: { name?: string }) {
+      const user = await findUserRawById(userId);
+      if (!user) return { error: 'Usuario no encontrado' };
+      if (typeof data?.name === 'string' && data.name.trim()) {
+        user.name = data.name.trim().slice(0, 60);
+      }
+      await upsertRow(SHEET_NAMES.USERS, user.id, [user.id, user.name, user.email, user.passwordHash, user.color, user.registeredAt]);
+      return { success: true, user: publicUser(user) };
+    },
+
+    async changePassword(userId: string, data: { currentPassword: string; newPassword: string }) {
+      const user = await findUserRawById(userId);
+      if (!user) return { error: 'Usuario no encontrado' };
+      const ok = await comparePassword(data?.currentPassword || '', user.passwordHash);
+      if (!ok) return { error: 'INVALID_PASSWORD' };
+      if (!data?.newPassword || data.newPassword.length < 6) {
+        return { error: 'La nueva contraseña debe tener al menos 6 caracteres' };
+      }
+      user.passwordHash = await hashPassword(data.newPassword);
+      await upsertRow(SHEET_NAMES.USERS, user.id, [user.id, user.name, user.email, user.passwordHash, user.color, user.registeredAt]);
+      return { success: true };
+    },
+
+    // ── Registro / login (usadas solo por api/_authHandler.ts, no expuestas
+    //    como acción genérica de /api/sheets) ──────────────────────
+    async findUserByEmail(email: string) {
       const rows = await readSheet(SHEET_NAMES.USERS);
-      return rows.filter(u => u.id && u.name).map(u => ({
-        id: String(u.id),
-        name: String(u.name),
-        email: String(u.email || ''),
-        avatar: String(u.avatar || ''),
-        color: u.color || 'indigo',
-        pin: String(u.pin || ''),
-        registeredAt: u.registeredAt || '',
-      }));
+      const normalized = email.trim().toLowerCase();
+      return rows.find(u => String(u.email || '').trim().toLowerCase() === normalized) ?? null;
     },
 
-    async saveUser(user: any) {
-      if (!user || !user.id || !user.name) return { error: 'Usuario inválido' };
-      const vals = [
-        user.id, user.name, user.email || '', user.avatar || '',
-        user.color || 'indigo', user.pin || '',
-        user.registeredAt || new Date().toISOString().split('T')[0],
-      ];
-      await upsertRow(SHEET_NAMES.USERS, user.id, vals);
-      return { success: true, id: user.id };
+    async createUser(data: { name: string; email: string; passwordHash: string }) {
+      const id = randomUUID();
+      const email = data.email.trim().toLowerCase();
+      const color = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+      const registeredAt = new Date().toISOString().split('T')[0];
+      await upsertRow(SHEET_NAMES.USERS, id, [id, data.name.trim().slice(0, 60), email, data.passwordHash, color, registeredAt]);
+      return publicUser({ id, name: data.name.trim().slice(0, 60), email, color });
     },
 
-    async deleteUser(data: { id: string }) {
-      const ok = await deleteRowById(SHEET_NAMES.USERS, data.id);
-      return { success: ok };
-    },
+    publicUser,
   };
 }
 
@@ -302,23 +396,22 @@ export type SheetsClient = ReturnType<typeof createSheetsClient>;
 export type SheetAction =
   | 'getAppData' | 'saveTransaction' | 'saveAccount' | 'saveCategories'
   | 'saveBudgets' | 'saveSettlement' | 'saveConfig' | 'deleteTransaction'
-  | 'deleteAccount' | 'getUsers' | 'saveUser' | 'deleteUser';
+  | 'deleteAccount' | 'updateProfile' | 'changePassword';
 
 /** Route an action to the matching client method. Throws on unknown actions. */
-export async function handleAction(client: SheetsClient, action: string, data: any): Promise<any> {
+export async function handleAction(client: SheetsClient, action: string, userId: string, data: any): Promise<any> {
   switch (action as SheetAction) {
-    case 'getAppData': return client.getAppData();
-    case 'saveTransaction': return client.saveTransaction(data);
-    case 'saveAccount': return client.saveAccount(data);
-    case 'saveCategories': return client.saveCategories(data);
-    case 'saveBudgets': return client.saveBudgets(data);
-    case 'saveSettlement': return client.saveSettlement(data);
-    case 'saveConfig': return client.saveConfig(data);
-    case 'deleteTransaction': return client.deleteTransaction(data);
-    case 'deleteAccount': return client.deleteAccount(data);
-    case 'getUsers': return client.getUsers();
-    case 'saveUser': return client.saveUser(data);
-    case 'deleteUser': return client.deleteUser(data);
+    case 'getAppData': return client.getAppData(userId);
+    case 'saveTransaction': return client.saveTransaction(userId, data);
+    case 'saveAccount': return client.saveAccount(userId, data);
+    case 'saveCategories': return client.saveCategories(userId, data);
+    case 'saveBudgets': return client.saveBudgets(userId, data);
+    case 'saveSettlement': return client.saveSettlement(userId, data);
+    case 'saveConfig': return client.saveConfig(userId, data);
+    case 'deleteTransaction': return client.deleteTransaction(userId, data);
+    case 'deleteAccount': return client.deleteAccount(userId, data);
+    case 'updateProfile': return client.updateProfile(userId, data);
+    case 'changePassword': return client.changePassword(userId, data);
     default: throw new Error(`Acción no reconocida: ${action}`);
   }
 }

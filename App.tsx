@@ -13,7 +13,7 @@ import {
   AlertCircle,
   LogOut,
 } from 'lucide-react';
-import { Transaction, TransactionType, Account, Currency, Budget, UserConfig, DEFAULT_USERS, Settlement, SplitPercents } from './types';
+import { Transaction, TransactionType, Account, Currency, Budget, AuthUser, Settlement, DEFAULT_SPLIT } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionsList from './components/TransactionsList';
 import AccountsManager from './components/AccountsManager';
@@ -21,9 +21,9 @@ import SharedExpenses from './components/SharedExpenses';
 import AIAdvisor from './components/AIAdvisor';
 import TransactionForm from './components/TransactionForm';
 import Settings from './components/Settings';
-import { sheetService, accessToken, UnauthorizedError } from './services/sheetService';
+import { sheetService, UnauthorizedError } from './services/sheetService';
+import { authService } from './services/authService';
 import LoginScreen from './components/LoginScreen';
-import UnlockScreen from './components/UnlockScreen';
 
 const INITIAL_CATEGORIES = ['Alimentación', 'Vivienda', 'Ocio', 'Transporte', 'Salud', 'Educación', 'Servicios', 'Suscripciones', 'Otros'];
 
@@ -37,7 +37,7 @@ const USER_AVATAR_COLORS: Record<string, string> = {
 };
 
 type AppView = 'dashboard' | 'transactions' | 'accounts' | 'shared' | 'ai' | 'settings';
-type AppPhase = 'loading' | 'unlock' | 'login' | 'app';
+type AppPhase = 'loading' | 'auth' | 'app';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('dashboard');
@@ -46,99 +46,78 @@ const App: React.FC = () => {
   const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [splitPercents, setSplitPercents] = useState<SplitPercents>({});
+  const [partnerName, setPartnerName] = useState<string>('Pareja');
+  const [myPercent, setMyPercent] = useState<number>(DEFAULT_SPLIT);
   const [usdRates, setUsdRates] = useState({ blue: 1240, official: 980 });
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('');
 
   // ── App Phase & Auth ────────────────────────────────────────
   const [phase, setPhase] = useState<AppPhase>('loading');
-  const [users, setUsers] = useState<UserConfig[]>(DEFAULT_USERS);
-  const [currentUser, setCurrentUser] = useState<UserConfig | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
 
-  // ── Bootstrap: determine initial phase ──────────────────────
-  const bootstrap = useCallback(async () => {
-    setPhase('loading');
-
-    // Load users from the service-account backed API. A 401 means the server
-    // has an access token configured and we need the user to unlock first.
-    let loadedUsers: UserConfig[] = [];
-    try {
-      loadedUsers = await sheetService.getUsers();
-      if (loadedUsers.length > 0) setUsers(loadedUsers);
-    } catch (e) {
-      if (e instanceof UnauthorizedError) {
-        setPhase('unlock');
-        return;
-      }
-      console.warn('Error cargando usuarios:', e);
+  // ── Bootstrap: restore a previous session, if any ───────────
+  useEffect(() => {
+    const token = authService.getToken();
+    const storedUser = authService.getStoredUser();
+    if (token && storedUser) {
+      setCurrentUser(storedUser);
+      setPhase('app');
+    } else {
+      setPhase('auth');
     }
-
-    // Restore a previous profile session if present.
-    try {
-      const session = sessionStorage.getItem('kora_session');
-      if (session) {
-        const sessionUser: UserConfig = JSON.parse(session);
-        // Prefer the fresh copy from the sheet (name/color may have changed).
-        const fresh = loadedUsers.find(u => u.id === sessionUser.id) ?? sessionUser;
-        setCurrentUser(fresh);
-        setPhase('app');
-        return;
-      }
-    } catch {}
-
-    setPhase('login');
   }, []);
 
-  useEffect(() => { bootstrap(); }, [bootstrap]);
-
-  // ── Unlock handler (shared access token) ────────────────────
-  const handleUnlock = async (token: string) => {
-    accessToken.set(token);
-    await bootstrap();
-  };
-
-  // ── Profile login handler ──────────────────────────────────
-  const handleLogin = (user: UserConfig) => {
-    sessionStorage.setItem('kora_session', JSON.stringify(user));
+  // ── Auth handlers ─────────────────────────────────────────────
+  const handleLogin = async (email: string, password: string) => {
+    const user = await authService.login(email, password);
     setCurrentUser(user);
     setPhase('app');
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem('kora_session');
-    setCurrentUser(null);
-    setTransactions([]);
-    setAccounts([]);
-    setSettlements([]);
-    setSplitPercents({});
-    setIsLoading(true);
-    setPhase('login');
+  const handleRegister = async (name: string, email: string, password: string) => {
+    const user = await authService.register(name, email, password);
+    setCurrentUser(user);
+    setPhase('app');
   };
 
-  const handleUpdateUsers = (updated: UserConfig[]) => {
-    const renames: Record<string, string> = {};
-    updated.forEach(u => {
-      const old = users.find(o => o.id === u.id);
-      if (old && old.name !== u.name) renames[old.name] = u.name;
-    });
-    if (Object.keys(renames).length > 0) {
-      setTransactions(prev => prev.map(t =>
-        renames[t.paidBy] ? { ...t, paidBy: renames[t.paidBy] } : t
-      ));
+  const resetAppState = () => {
+    setTransactions([]);
+    setAccounts([]);
+    setCategories(INITIAL_CATEGORIES);
+    setBudgets([]);
+    setSettlements([]);
+    setPartnerName('Pareja');
+    setMyPercent(DEFAULT_SPLIT);
+    setView('dashboard');
+  };
+
+  const handleLogout = () => {
+    authService.clearSession();
+    setCurrentUser(null);
+    resetAppState();
+    setIsLoading(true);
+    setPhase('auth');
+  };
+
+  const handleUpdateName = async (name: string) => {
+    const updated = await sheetService.updateProfile(name);
+    if (updated) {
+      setCurrentUser(prev => prev ? { ...prev, name: updated.name } : prev);
+      authService.updateStoredUser(updated as AuthUser);
     }
+  };
 
-    const deletedUsers = users.filter(u => !updated.find(u2 => u2.id === u.id));
-    deletedUsers.forEach(u => sheetService.deleteUser(u.id).catch(console.error));
-    updated.forEach(u => sheetService.saveUser(u).catch(console.error));
+  const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+    await sheetService.changePassword(currentPassword, newPassword);
+  };
 
-    setUsers(updated);
-    localStorage.setItem('kora_users_config', JSON.stringify(updated));
-    if (currentUser) {
-      const me = updated.find(u => u.id === currentUser.id);
-      if (me) {
-        setCurrentUser(me);
-        sessionStorage.setItem('kora_session', JSON.stringify(me));
-      }
+  const handleUpdatePartnerName = async (name: string) => {
+    const trimmed = name.trim() || 'Pareja';
+    setPartnerName(trimmed);
+    try {
+      await sheetService.saveConfig('partner_name', trimmed);
+    } catch (e) {
+      console.error('Error guardando nombre de pareja:', e);
     }
   };
 
@@ -165,11 +144,10 @@ const App: React.FC = () => {
         if (data.categories?.length > 0) setCategories(data.categories);
         if (data.budgets?.length > 0) setBudgets(data.budgets);
         setSettlements(data.settlements ?? []);
-        if (data.config?.split_percents) {
-          try {
-            const parsed = JSON.parse(data.config.split_percents);
-            if (parsed && typeof parsed === 'object') setSplitPercents(parsed);
-          } catch {}
+        if (data.config?.partner_name) setPartnerName(data.config.partner_name);
+        if (data.config?.split_my_percent) {
+          const parsed = parseInt(data.config.split_my_percent, 10);
+          if (!Number.isNaN(parsed)) setMyPercent(parsed);
         }
       }
 
@@ -180,9 +158,13 @@ const App: React.FC = () => {
       if (savedWebhook) setN8nWebhookUrl(savedWebhook);
     } catch (e) {
       if (e instanceof UnauthorizedError) {
+        // Sesión inválida o expirada: hay que volver a iniciar sesión.
+        authService.clearSession();
+        setCurrentUser(null);
+        resetAppState();
         setIsLoading(false);
         setIsSyncing(false);
-        setPhase('unlock');
+        setPhase('auth');
         return;
       }
       console.error("Error init:", e);
@@ -274,11 +256,11 @@ const App: React.FC = () => {
     }
   };
 
-  /** Actualiza el % de aporte de cada usuario (persiste en Google Sheets) */
-  const handleUpdateSplit = async (percents: SplitPercents) => {
-    setSplitPercents(percents);
+  /** Actualiza el % de aporte del usuario actual a los gastos compartidos (persiste en Google Sheets) */
+  const handleUpdateSplit = async (percent: number) => {
+    setMyPercent(percent);
     try {
-      await sheetService.saveConfig('split_percents', JSON.stringify(percents));
+      await sheetService.saveConfig('split_my_percent', String(percent));
     } catch (e) {
       console.error("Error guardando reparto:", e);
     }
@@ -363,19 +345,9 @@ const App: React.FC = () => {
     );
   }
 
-  // ── Phase: Unlock (server requires an access token) ─────────
-  if (phase === 'unlock') {
-    return <UnlockScreen onUnlock={handleUnlock} />;
-  }
-
-  // ── Phase: Login ────────────────────────────────────────────
-  if (phase === 'login') {
-    return (
-      <LoginScreen
-        users={users}
-        onLogin={handleLogin}
-      />
-    );
+  // ── Phase: Auth (login / registro) ───────────────────────────
+  if (phase === 'auth') {
+    return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} />;
   }
 
   // ── Phase: App (loading data) ───────────────────────────────
@@ -445,13 +417,9 @@ const App: React.FC = () => {
             </div>
             {/* Avatar + nombre del usuario activo */}
             <div className="flex items-center gap-2 pl-1">
-              {currentUser?.avatar ? (
-                <img src={currentUser.avatar} alt={currentUser.name} className="w-7 h-7 rounded-lg object-cover" />
-              ) : (
-                <div className={`w-7 h-7 rounded-lg ${USER_AVATAR_COLORS[currentUser?.color ?? 'indigo'] ?? 'bg-indigo-500'} flex items-center justify-center text-white text-xs font-black`}>
-                  {currentUser?.name[0]?.toUpperCase()}
-                </div>
-              )}
+              <div className={`w-7 h-7 rounded-lg ${USER_AVATAR_COLORS[currentUser?.color ?? 'indigo'] ?? 'bg-indigo-500'} flex items-center justify-center text-white text-xs font-black`}>
+                {currentUser?.name[0]?.toUpperCase()}
+              </div>
               <span className="text-sm font-bold text-slate-600 hidden sm:block">{currentUser?.name}</span>
               <button
                 onClick={handleLogout}
@@ -469,26 +437,29 @@ const App: React.FC = () => {
             {view === 'dashboard' && <Dashboard transactions={transactions} accounts={accounts} budgets={budgets} usdRate={usdRates.official} blueRate={usdRates.blue} />}
             {view === 'transactions' && <TransactionsList transactions={transactions} categories={categories} onEdit={(t) => { setEditingTransaction(t); setIsFormOpen(true); }} onDelete={handleDeleteTransaction} />}
             {view === 'accounts' && <AccountsManager accounts={accounts} onAddAccount={handleSaveAccount} onUpdateAccount={handleSaveAccount} onDeleteAccount={handleDeleteAccount} />}
-            {view === 'shared' && (
+            {view === 'shared' && currentUser && (
               <SharedExpenses
                 transactions={transactions}
                 usdRate={usdRates.official}
                 onSettle={handleMonthlyClose}
-                currentUser={currentUser!}
-                partner={users.find(u => u.id !== currentUser!.id) ?? null}
+                currentUser={currentUser}
+                partnerName={partnerName}
                 settlements={settlements}
-                splitPercents={splitPercents}
+                myPercent={myPercent}
                 onUpdateSplit={handleUpdateSplit}
               />
             )}
-            {view === 'settings' && (
+            {view === 'settings' && currentUser && (
               <Settings
                 categories={categories} setCategories={(c) => sheetService.saveCategories(c).then(init)}
                 budgets={budgets} setBudgets={handleUpdateBudgets}
                 usdRates={usdRates} onUpdateRates={setUsdRates}
                 n8nWebhookUrl={n8nWebhookUrl} onUpdateWebhookUrl={setN8nWebhookUrl}
-                users={users} onUpdateUsers={handleUpdateUsers}
-                currentUserId={currentUser!.id}
+                currentUser={currentUser}
+                onUpdateName={handleUpdateName}
+                onChangePassword={handleChangePassword}
+                partnerName={partnerName}
+                onUpdatePartnerName={handleUpdatePartnerName}
               />
             )}
             {view === 'ai' && <AIAdvisor transactions={transactions} budgets={budgets} accounts={accounts} webhookUrl={n8nWebhookUrl} />}
@@ -537,15 +508,15 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {(isFormOpen || editingTransaction) && (
+      {(isFormOpen || editingTransaction) && currentUser && (
         <TransactionForm
           onClose={() => { setIsFormOpen(false); setEditingTransaction(null); }}
           onSubmit={saveTransaction}
           accounts={accounts}
           categories={categories}
           editData={editingTransaction || undefined}
-          currentUserName={currentUser!.name}
-          partnerName={users.find(u => u.id !== currentUser!.id)?.name ?? 'Pareja'}
+          currentUserName={currentUser.name}
+          partnerName={partnerName}
         />
       )}
     </div>

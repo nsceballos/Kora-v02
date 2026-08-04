@@ -17,22 +17,19 @@ export enum Currency {
   USD = 'USD'
 }
 
-export interface UserConfig {
+export type AvatarColor = 'indigo' | 'rose' | 'emerald' | 'amber' | 'cyan' | 'purple';
+
+/**
+ * Usuario autenticado. Cada AuthUser es una cuenta independiente: sus
+ * transacciones, cuentas, categorías, presupuestos y cierres viven en filas
+ * de Google Sheets marcadas con su `id` y nunca se exponen a otros usuarios.
+ */
+export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  avatar: string;
-  pin: string;
-  color: 'indigo' | 'rose' | 'emerald' | 'amber' | 'cyan' | 'purple';
-  registeredAt?: string;
+  color: AvatarColor;
 }
-
-export const USER_COLORS: UserConfig['color'][] = ['indigo', 'rose', 'emerald', 'amber', 'cyan', 'purple'];
-
-export const DEFAULT_USERS: UserConfig[] = [
-  { id: 'user1', name: 'Yo',     email: '', avatar: '', pin: '', color: 'indigo' },
-  { id: 'user2', name: 'Pareja', email: '', avatar: '', pin: '', color: 'rose'   },
-];
 
 export interface Transaction {
   id: string;
@@ -91,9 +88,7 @@ export interface Settlement {
   txCount: number;
 }
 
-/** Porcentaje de aporte por usuario (id → %). Debe sumar 100. Default 50/50. */
-export type SplitPercents = Record<string, number>;
-
+/** % que aporta el usuario actual a los gastos compartidos (el resto es del/de la partner). Default 50/50. */
 export const DEFAULT_SPLIT = 50;
 
 export interface AppData {

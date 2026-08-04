@@ -9,7 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "google-auth-library": "^10.9.0",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.462.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -17,6 +19,8 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.7",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vercel/node": "^5.8.23",

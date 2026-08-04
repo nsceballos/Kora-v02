@@ -1,177 +1,164 @@
 import React, { useState } from 'react';
-import { UserConfig } from '../types';
-import { Delete } from 'lucide-react';
+import { Loader2, ArrowRight, Mail, Lock, User as UserIcon, AlertCircle } from 'lucide-react';
 
 interface Props {
-  users: UserConfig[];
-  onLogin: (user: UserConfig) => void;
+  onLogin: (email: string, password: string) => Promise<void>;
+  onRegister: (name: string, email: string, password: string) => Promise<void>;
 }
 
-const AVATAR_BG: Record<UserConfig['color'], string> = {
-  indigo:  'bg-indigo-500',
-  rose:    'bg-rose-500',
-  emerald: 'bg-emerald-500',
-  amber:   'bg-amber-500',
-  cyan:    'bg-cyan-500',
-  purple:  'bg-purple-500',
-};
+type Mode = 'login' | 'register';
 
-const BORDER_COLORS: Record<UserConfig['color'], string> = {
-  indigo:  'border-indigo-400',
-  rose:    'border-rose-400',
-  emerald: 'border-emerald-400',
-  amber:   'border-amber-400',
-  cyan:    'border-cyan-400',
-  purple:  'border-purple-400',
-};
+/**
+ * Pantalla de acceso: alterna entre iniciar sesión y crear una cuenta nueva.
+ * Cada cuenta es independiente — sus gastos, cuentas y presupuestos no son
+ * visibles para ningún otro usuario (ver README para el detalle técnico).
+ */
+const LoginScreen: React.FC<Props> = ({ onLogin, onRegister }) => {
+  const [mode, setMode] = useState<Mode>('login');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-const LoginScreen: React.FC<Props> = ({ users, onLogin }) => {
-  const [selected, setSelected] = useState<UserConfig | null>(null);
-  const [pin, setPin] = useState('');
-  const [error, setError] = useState(false);
-
-  const handleSelectUser = (user: UserConfig) => {
-    if (!user.pin) {
-      onLogin(user);
-      return;
-    }
-    setSelected(user);
-    setPin('');
-    setError(false);
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+    setPassword('');
+    setConfirmPassword('');
   };
 
-  const handleDigit = (d: string) => {
-    if (pin.length >= 4 || error) return;
-    const newPin = pin + d;
-    setPin(newPin);
-    if (newPin.length === 4) {
-      if (selected!.pin === newPin) {
-        onLogin(selected!);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (mode === 'register') {
+      if (!name.trim()) return setError('Ingresá tu nombre.');
+      if (password.length < 6) return setError('La contraseña debe tener al menos 6 caracteres.');
+      if (password !== confirmPassword) return setError('Las contraseñas no coinciden.');
+    }
+
+    setLoading(true);
+    try {
+      if (mode === 'login') {
+        await onLogin(email.trim(), password);
       } else {
-        setError(true);
-        setTimeout(() => { setPin(''); setError(false); }, 900);
+        await onRegister(name.trim(), email.trim(), password);
       }
+    } catch (err: any) {
+      setError(err?.message || 'Ocurrió un error. Intentá de nuevo.');
+    } finally {
+      setLoading(false);
     }
   };
-
-  const handleDelete = () => {
-    if (!error) setPin(p => p.slice(0, -1));
-  };
-
-  const handleBack = () => {
-    setSelected(null);
-    setPin('');
-    setError(false);
-  };
-
-  const NumKey = ({ label, onClick }: { label: React.ReactNode; onClick: () => void }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className="h-16 bg-white/5 hover:bg-white/15 active:bg-white/25 text-white text-xl font-bold rounded-2xl border border-white/10 flex items-center justify-center transition-all active:scale-95 select-none"
-    >
-      {label}
-    </button>
-  );
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
-      {/* Logo */}
-      <div className="flex items-center gap-3 mb-10">
+      <div className="flex items-center gap-3 mb-8">
         <div className="w-11 h-11 kora-gradient rounded-2xl flex items-center justify-center font-black text-white text-lg">K</div>
         <h1 className="text-3xl font-black text-white tracking-tighter">Kora</h1>
       </div>
 
-      {!selected ? (
-        /* ── Selector de usuario ── */
-        <>
-          {users.length > 0 && (
-            <>
-              <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em] mb-8">Selecciona tu perfil</p>
-              <div className="flex gap-5 flex-wrap justify-center">
-                {users.map(user => (
-                  <button
-                    key={user.id}
-                    onClick={() => handleSelectUser(user)}
-                    className="flex flex-col items-center gap-3 p-6 bg-white/5 hover:bg-white/10 active:bg-white/15 rounded-3xl border border-white/10 hover:border-white/20 transition-all hover:scale-105 active:scale-95 min-w-[130px]"
-                  >
-                    {user.avatar ? (
-                      <img src={user.avatar} alt={user.name} className="w-16 h-16 rounded-2xl shadow-lg object-cover" />
-                    ) : (
-                      <div className={`w-16 h-16 rounded-2xl ${AVATAR_BG[user.color]} flex items-center justify-center text-white text-2xl font-black shadow-lg`}>
-                        {user.name[0]?.toUpperCase() || '?'}
-                      </div>
-                    )}
-                    <span className="text-white font-bold text-sm">{user.name}</span>
-                    <span className="text-[10px] text-slate-500 uppercase tracking-widest">
-                      {user.pin ? 'PIN requerido' : 'Sin PIN'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      ) : (
-        /* ── Entrada de PIN ── */
-        <div className="flex flex-col items-center gap-6 w-full max-w-[260px]">
+      <div className="w-full max-w-sm">
+        {/* Tabs */}
+        <div className="flex bg-white/5 border border-white/10 rounded-2xl p-1 mb-6">
           <button
-            onClick={handleBack}
-            className="self-start text-slate-500 hover:text-slate-300 text-sm font-bold transition-colors"
+            type="button"
+            onClick={() => switchMode('login')}
+            className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest rounded-xl transition-all ${
+              mode === 'login' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'
+            }`}
           >
-            ← Volver
+            Iniciar sesión
           </button>
-
-          {/* Avatar del usuario seleccionado */}
-          <div className="flex flex-col items-center gap-2">
-            {selected.avatar ? (
-              <img src={selected.avatar} alt={selected.name} className="w-16 h-16 rounded-2xl shadow-lg object-cover" />
-            ) : (
-              <div className={`w-16 h-16 rounded-2xl ${AVATAR_BG[selected.color]} flex items-center justify-center text-white text-2xl font-black shadow-lg`}>
-                {selected.name[0]?.toUpperCase()}
-              </div>
-            )}
-            <p className="text-white font-bold">{selected.name}</p>
-          </div>
-
-          <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em]">Ingresá tu PIN</p>
-
-          {/* Puntos del PIN */}
-          <div className={`flex gap-4 transition-all ${error ? 'translate-x-0' : ''}`}
-            style={{ animation: error ? 'shake 0.5s ease-in-out' : 'none' }}
+          <button
+            type="button"
+            onClick={() => switchMode('register')}
+            className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest rounded-xl transition-all ${
+              mode === 'register' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'
+            }`}
           >
-            {[0, 1, 2, 3].map(i => (
-              <div
-                key={i}
-                className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${
-                  pin.length > i
-                    ? error
-                      ? 'bg-rose-500 border-rose-500 scale-110'
-                      : `${AVATAR_BG[selected.color]} ${BORDER_COLORS[selected.color]} scale-110`
-                    : 'border-slate-600'
-                }`}
-              />
-            ))}
-          </div>
+            Crear cuenta
+          </button>
+        </div>
 
-          {error && (
-            <p className="text-rose-400 text-xs font-bold -mt-2">PIN incorrecto</p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'register' && (
+            <div className="relative">
+              <UserIcon size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                autoFocus
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Tu nombre"
+                className="w-full pl-11 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all"
+              />
+            </div>
           )}
 
-          {/* Teclado numérico */}
-          <div className="grid grid-cols-3 gap-3 w-full">
-            {['1','2','3','4','5','6','7','8','9'].map(d => (
-              <NumKey key={d} label={d} onClick={() => handleDigit(d)} />
-            ))}
-            <div />
-            <NumKey label="0" onClick={() => handleDigit('0')} />
-            <NumKey
-              label={<Delete size={20} className="text-slate-400" />}
-              onClick={handleDelete}
+          <div className="relative">
+            <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="email"
+              required
+              autoFocus={mode === 'login'}
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="Email"
+              className="w-full pl-11 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all"
             />
           </div>
-        </div>
-      )}
+
+          <div className="relative">
+            <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Contraseña"
+              className="w-full pl-11 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all"
+            />
+          </div>
+
+          {mode === 'register' && (
+            <div className="relative">
+              <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Repetir contraseña"
+                className="w-full pl-11 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all"
+              />
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 text-rose-400 text-xs font-bold">
+              <AlertCircle size={14} className="shrink-0" />
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full kora-gradient text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 shadow-xl hover:scale-[1.02] transition-transform active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+          >
+            {loading ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <>{mode === 'login' ? 'Entrar' : 'Crear cuenta'} <ArrowRight size={18} /></>
+            )}
+          </button>
+        </form>
+      </div>
 
       <p className="text-slate-700 text-[10px] mt-16 uppercase tracking-widest font-bold">
         Kora — Finanzas personales
